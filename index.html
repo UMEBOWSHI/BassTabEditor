@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bass Tab Editor</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#111;--bg2:#1a1a1a;--bg3:#222;--border:#333;--border2:#444;
+  --text:#e8e8e8;--text2:#999;--text3:#666;
+  --blue:#2a7fd4;--blue2:#1a5fa0;--amber:#e8a020;
+  --green:#1a9e6a;--purple:#7c3aed;--red:#c0392b;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+h1{font-size:18px;font-weight:700;color:var(--amber);letter-spacing:0.05em}
+.app{max-width:780px;margin:0 auto;padding:16px 12px}
+.topbar{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.topbar h1{flex:1}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.lbl{font-size:12px;color:var(--text2);white-space:nowrap}
+select,input[type=number]{background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:5px;padding:4px 8px;font-size:12px;cursor:pointer}
+select:focus,input[type=number]:focus{outline:none;border-color:var(--blue)}
+input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
+.val{font-size:12px;font-weight:600;min-width:52px;text-align:center;color:var(--text)}
+.btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:5px 11px;border:1px solid var(--border2);border-radius:5px;background:var(--bg3);color:var(--text);cursor:pointer;transition:all .12s;user-select:none}
+.btn:hover{background:var(--bg2);border-color:var(--text3)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{background:var(--blue2)}
+.btn.sm{padding:3px 7px;font-size:11px}
+.btn.active,.btn.on-loop{background:var(--green);border-color:var(--green);color:#fff}
+.divider{display:flex;align-items:center;gap:8px;margin:12px 0 8px}
+.divider span{font-size:11px;color:var(--text3);white-space:nowrap}
+.divider hr{flex:1;border:none;border-top:1px solid var(--border)}
+.hint{font-size:11px;color:var(--text3);margin-bottom:8px}
+/* Tab grid */
+.tab-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2);margin-bottom:10px}
+.tab-canvas-wrap{display:inline-block;min-width:100%}
+.tab-grid-wrap{display:flex}
+.string-labels{display:flex;flex-direction:column;border-right:1px solid var(--border);flex-shrink:0}
+.string-lbl{width:34px;height:44px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text2)}
+.string-lbl.low{color:var(--amber)}
+.bars-area{display:flex;flex:1;position:relative}
+.bar-block{display:flex;flex-direction:column;border-right:2px solid var(--border2);flex-shrink:0}
+.bar-block:first-child{border-left:2px solid var(--border2)}
+.bar-header{height:18px;display:flex;align-items:center;padding-left:5px;font-size:9px;color:var(--text3);border-bottom:1px solid var(--border);gap:4px}
+.bar-del{cursor:pointer;opacity:.4;font-size:10px}
+.bar-del:hover{opacity:1;color:var(--red)}
+.bar-act{cursor:pointer;opacity:.45;font-size:10px}
+.bar-act:hover{opacity:1}
+.bar-act.dis{opacity:.15;cursor:default;pointer-events:none}
+.steps-row{display:flex;position:relative}
+.step-col{width:44px;flex-shrink:0;border-right:1px solid var(--border);position:relative}
+.step-col:last-child{border-right:none}
+.step-col.beat{border-left:1px solid #444}
+.step-col.playing{background:rgba(42,127,212,.1)}
+.string-lane{height:44px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer}
+.string-lane:hover{background:rgba(255,255,255,.03)}
+.string-line{width:36px;height:1px;background:var(--border2);position:absolute;pointer-events:none}
+.note-block{position:absolute;height:27px;border-radius:4px;background:var(--blue);z-index:10;cursor:pointer;overflow:hidden}
+.note-block:hover{filter:brightness(1.15)}
+.note-block.playing{background:var(--amber)}
+.note-block.ghost{background:transparent;border:1.5px dashed var(--blue)}
+.note-block.ghost.playing{border-color:var(--amber)}
+.note-inner{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:0 3px;z-index:3}
+.note-fret{font-size:11px;font-weight:700;color:#fff;font-family:monospace;line-height:1;white-space:nowrap}
+.ghost .note-fret{color:var(--blue);font-size:13px}
+.ghost.playing .note-fret{color:var(--amber)}
+.note-meta{display:flex;align-items:center;gap:1px;font-size:8px;color:rgba(255,255,255,.6)}
+.slide-seg{position:absolute;top:0;bottom:0;z-index:1;border-right:1px solid rgba(255,255,255,.25)}
+.slide-seg.hold{background:rgba(255,255,255,.05)}
+.slide-seg.slide{background:rgba(124,58,237,.25)}
+.dot-fade{position:absolute;top:0;right:0;bottom:0;background:rgba(255,255,255,.25);z-index:1}
+.stac-ghost{position:absolute;top:0;bottom:0;right:0;border:1.5px dashed rgba(255,255,255,.4);border-left:none;z-index:1}
+.vib-lbl{position:absolute;bottom:1px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(255,255,255,.75);z-index:3;pointer-events:none}
+.rh{position:absolute;top:3px;bottom:3px;width:9px;display:none;align-items:center;justify-content:center;font-size:7px;color:#fff;cursor:pointer;z-index:20;user-select:none;background:rgba(0,0,0,.4);border-radius:2px}
+.note-block:hover .rh{display:flex}
+.rh-l{left:1px}.rh-r{right:1px}
+.rh:hover{background:rgba(0,0,0,.7)}
+.playhead{position:absolute;top:0;bottom:0;width:2px;background:rgba(42,127,212,.8);pointer-events:none;z-index:20;display:none}
+.playhead.visible{display:block}
+.add-bar-btn{width:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:transparent;border:none;color:var(--text3);font-size:18px;opacity:.4;transition:opacity .1s;padding:0 3px;align-self:stretch;flex-shrink:0}
+.add-bar-btn:hover{opacity:.8}
+/* SVG preview */
+.tab-view-outer{border:1px solid var(--border);border-radius:8px;background:var(--bg2)}
+.tab-view-scroll{overflow-x:auto;overflow-y:auto}
+.tab-svg{display:block}
+.svgn{color:#2a7fd4}
+.svgn.playing{color:#e8a020}
+/* Transport */
+.transport-bar{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg2);margin-bottom:10px}
+.transport-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:8px}
+.transport-row:last-child{margin-bottom:0}
+.pbar-wrap{position:relative;height:28px;background:var(--bg);border:1px solid var(--border2);border-radius:5px;cursor:pointer;overflow:hidden;flex:1;min-width:100px}
+.pbar-fill{position:absolute;top:0;left:0;bottom:0;background:var(--blue);opacity:.25;pointer-events:none}
+.pbar-head{position:absolute;top:0;bottom:0;width:3px;background:var(--amber);pointer-events:none;transform:translateX(-50%)}
+.pbar-marks{position:absolute;top:0;bottom:0;left:0;right:0;pointer-events:none}
+.pbar-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:10px;color:var(--text3);pointer-events:none;white-space:nowrap}
+.loop-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.loop-inp{width:52px;font-size:12px;padding:3px 5px;text-align:center;-moz-appearance:textfield}
+.loop-inp::-webkit-outer-spin-button,.loop-inp::-webkit-inner-spin-button{-webkit-appearance:none}
+/* Popup */
+.pop{position:fixed;z-index:200;background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:18px;box-shadow:0 4px 24px rgba(0,0,0,.6)}
+.pop-inner{display:flex;gap:16px;align-items:flex-start}
+.pop-left{width:250px;flex-shrink:0}
+.pop-right{width:260px;flex-shrink:0;display:none;border-left:1px solid var(--border);padding-left:14px}
+.pop-right.vis{display:block}
+.pop-right-title{font-size:11px;color:var(--text3);margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.pop-tr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.pop-title{font-size:12px;color:var(--text2)}
+.pop-cbs{display:flex;gap:6px}
+.pop-cbs .btn{padding:7px 12px;font-size:14px}
+.pop-field{margin-bottom:10px}
+.pop-field label{font-size:12px;color:var(--text2);display:block;margin-bottom:4px}
+.pop-field input[type=number]{width:84px;font-size:15px;padding:6px 9px;-moz-appearance:textfield}
+.pop-field input[type=number]::-webkit-outer-spin-button,.pop-field input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+.pop-field input[type=number]:focus{outline:none;border-color:var(--blue)}
+.pop-field select{width:100%;font-size:13px;padding:6px 8px}
+.pop-field.dis{opacity:.35;pointer-events:none}
+.mod-sec{margin-bottom:10px}
+.mod-sec-lbl{font-size:11px;color:var(--text3);margin-bottom:5px}
+.mod-row{display:flex;gap:5px;flex-wrap:wrap}
+.mod-btn{padding:7px 6px;font-size:11px;border-radius:6px;cursor:pointer;text-align:center;transition:all .12s;display:flex;flex-direction:column;align-items:center;gap:3px;border:1.5px solid var(--border2);background:var(--bg3);color:var(--text2);min-width:48px}
+.mod-btn:hover{border-color:var(--text3)}
+.mod-btn.on-dot{border-color:var(--blue);background:#1a3a5c;color:#7ab8f0}
+.mod-btn.on-ghost{border-color:#666;background:#2a2a2a;color:#bbb}
+.mod-btn.on-stac{border-color:var(--amber);background:#3a2a08;color:#e8c060}
+.mod-btn.on-vib{border-color:var(--green);background:#0a2a1a;color:#60c090}
+.mod-btn.on-slide{border-color:var(--purple);background:#2a1a4a;color:#c4a0f0}
+.mod-btn .mi{font-size:13px}
+.mod-btn .ml{font-size:9px}
+/* Slide dest list */
+.slide-dest-list{margin-bottom:8px}
+.sdest-row{display:flex;align-items:center;gap:5px;margin-bottom:5px}
+.sdest-lbl{font-size:11px;color:var(--text3);min-width:28px}
+.sdest-inp{width:66px;font-size:13px;padding:5px 7px;-moz-appearance:textfield}
+.sdest-inp::-webkit-outer-spin-button,.sdest-inp::-webkit-inner-spin-button{-webkit-appearance:none}
+.sdest-rm{width:22px;height:22px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border2);border-radius:4px;cursor:pointer;font-size:11px;color:var(--text3);background:var(--bg3);flex-shrink:0}
+.sdest-rm:hover{border-color:var(--red);color:var(--red)}
+.sdest-add-row{display:flex;align-items:center;gap:5px;margin-top:3px;margin-bottom:8px}
+/* Zone panel */
+.zone-panel{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:9px}
+.zone-panel-title{font-size:11px;color:var(--text3);margin-bottom:5px;font-weight:600}
+.zone-row{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.step-btn{width:22px;height:22px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);cursor:pointer;font-size:12px;color:var(--text);user-select:none;flex-shrink:0}
+.step-btn:hover:not([disabled]){background:var(--bg2)}
+.step-btn[disabled]{opacity:.25;cursor:default}
+.zone-num-inp{width:34px;font-size:11px;font-weight:600;text-align:center;padding:2px 3px;-moz-appearance:textfield}
+.zone-num-inp::-webkit-outer-spin-button,.zone-num-inp::-webkit-inner-spin-button{-webkit-appearance:none}
+.zone-diagram{margin-top:5px;border-radius:4px;overflow:hidden;display:flex;height:24px;border:1px solid rgba(124,58,237,.3)}
+.zd-seg{display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;overflow:hidden;white-space:nowrap;transition:flex .1s}
+.zd-anchor{background:rgba(124,58,237,.6)}
+.zd-slide{background:rgba(124,58,237,.2);color:rgba(180,140,255,.9)}
+.mod-btn .mi{font-size:11px;font-weight:700;line-height:1}
+.mod-btn .ml{font-size:8px;line-height:1}
+.mod-btn.off .mi,.mod-btn.off .ml{opacity:.3}
+/* Popup actions */
+.pop-acts{display:flex;gap:7px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.pop-acts .btn{flex:1;padding:9px 10px;font-size:13px;justify-content:center}
+.pop-del{color:var(--red);border-color:rgba(192,57,43,.4)}
+.pop-del:hover{background:rgba(192,57,43,.1)}
+/* IO */
+.io-panel{border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg2)}
+.io-panel-title{font-size:11px;color:var(--text2);margin-bottom:7px}
+.io-ta{width:100%;height:68px;font-size:10px;font-family:monospace;padding:7px;border:1px solid var(--border2);border-radius:5px;background:var(--bg);color:var(--text);resize:vertical;outline:none}
+.io-ta:focus{border-color:var(--blue)}
+.io-row{display:flex;gap:7px;margin-top:7px;align-items:center;flex-wrap:wrap}
+.io-ok{font-size:10px;color:var(--green)}
+.io-err{font-size:10px;color:var(--red)}
+.status-bar{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:11px;color:var(--text3)}
+.sdot{width:7px;height:7px;border-radius:50%;background:var(--border2);transition:background .1s}
+.sdot.playing{background:var(--green)}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="topbar">
+  <h1>🎸 Bass Tab Editor</h1>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span class="lbl">弦数</span>
+    <select id="stringSel"><option value="4" selected>4弦</option><option value="5">5弦</option><option value="6">6弦</option></select>
+    <span class="lbl">拍子</span>
+    <select id="timeSig"><option value="4">4/4</option><option value="3">3/4</option><option value="6">6/8</option></select>
+  </div>
+</div>
+<div class="row">
+  <span class="lbl">テンポ</span>
+  <button class="btn" id="tm">−</button>
+  <input type="range" id="tempoSl" min="40" max="240" value="80">
+  <button class="btn" id="tp">＋</button>
+  <span class="val"><span id="tempoV">80</span> BPM</span>
+</div>
+<div class="row">
+  <span class="lbl">音量</span>
+  <button class="btn" id="vm">−</button>
+  <input type="range" id="volSl" min="0" max="100" value="50">
+  <button class="btn" id="vp">＋</button>
+  <span class="val"><span id="volV">50</span></span>
+  <button class="btn" id="clearBtn">🗑 クリア</button>
+</div>
+<!-- Transport -->
+<div class="transport-bar">
+  <div class="transport-row">
+    <button class="btn sm" id="rewindBtn">⏮ 最初</button>
+    <button class="btn sm" id="skip4Back">−4小節</button>
+    <button class="btn sm" id="skipBarBack">−1小節</button>
+    <button class="btn primary" id="playBtn">▶ 再生</button>
+    <button class="btn sm" id="skipBarFwd">+1小節</button>
+    <button class="btn sm" id="skip4Fwd">+4小節</button>
+    <button class="btn sm" id="loopBtn">🔁 ループ OFF</button>
+  </div>
+  <div class="pbar-wrap" id="pbarWrap">
+    <div class="pbar-fill" id="pbarFill"></div>
+    <svg class="pbar-marks" id="pbarMarks" style="position:absolute;top:0;left:0;width:100%;height:100%"></svg>
+    <div class="pbar-head" id="pbarHead"></div>
+    <div class="pbar-label" id="pbarLabel">小節 1 · step 1</div>
+  </div>
+  <div class="loop-row" id="loopRow" style="display:none">
+    <span class="lbl">ループ開始小節</span>
+    <input type="number" class="loop-inp" id="loopStart" min="1" placeholder="1">
+    <span class="lbl">〜終了小節</span>
+    <input type="number" class="loop-inp" id="loopEnd" min="1" placeholder="最後">
+    <span style="font-size:10px;color:var(--text3)">空欄=先頭/末尾</span>
+  </div>
+</div>
+<div class="hint">弦の線をクリックして音符を追加。再生バーをドラッグして位置移動。</div>
+<div class="tab-scroll"><div class="tab-canvas-wrap" id="tabCanvas"></div></div>
+<div class="divider"><span>タブ譜プレビュー</span><hr>
+  <button class="btn sm" id="barsToggle">2小節表示</button>
+  <button class="btn sm active" id="scrollToggle">自動スクロール ON</button>
+</div>
+<div class="tab-view-outer"><div class="tab-view-scroll" id="tabViewScroll"><svg id="tabSvg" class="tab-svg"></svg></div></div>
+<div class="divider"><span>保存・読み込み</span><hr></div>
+<div class="io-panel">
+  <div class="io-panel-title">テキストコードでエクスポート／インポート</div>
+  <textarea class="io-ta" id="ioTa" placeholder="エクスポートするとここにコードが表示されます。"></textarea>
+  <div class="io-row">
+    <button class="btn sm" id="exportBtn">↑ エクスポート</button>
+    <button class="btn sm primary" id="importBtn">↓ インポート</button>
+    <button class="btn sm" id="copyBtn">コピー</button>
+    <span id="ioMsg"></span>
+  </div>
+</div>
+<div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────
+const SPB=16,SW=44,DDUR=4;
+const STRS={
+  4:[{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28}],
+  5:[{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28},{n:'B',m:23}],
+  6:[{n:'C',m:48},{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28},{n:'B',m:23}]
+};
+const DURS=[{l:'十六分音符(1)',v:1},{l:'八分音符(2)',v:2},{l:'四分音符(4)',v:4},{l:'二分音符(8)',v:8},{l:'全音符(16)',v:16}];
+
+const SVG_LP=30,SVG_TP=22,SVG_SG=24,SVG_RP=12;
+let svgBPL=4,autoSc=true;
+function getCW(){return svgBPL===4?10:20}
+
+let actx=null,mgain=null;
+let playing=false,ptimer=null,ppos=0;
+let afId=null,pst=0,psp=0,ptempo=80;
+let tSig=4,tempo=80,nStr=4,bars=1,vol=0.5;
+let notes={},clip=null,barClip=null;
+let loopOn=false,loopSBar=null,loopEBar=null;
+
+function gStr(){return STRS[nStr]}
+function tSteps(){return bars*SPB}
+function nk(si,s){return si+':'+s}
+function m2f(m){return 440*Math.pow(2,(m-69)/12)}
+function dispS(n){return n.dot?n.d*1.5:n.d}
+function durSec(n,t){let s=n.d;if(n.dot)s*=1.5;if(n.stac)s*=0.5;return(60/t)*(s/4)}
+function hss(){return(60/tempo)*0.125} // 32nd note sec
+// Total 32nd-note slots available for a note's slide (matches dispS but in 32nds)
+function gmxFor(note){const eff=note.dot?note.d*1.5:note.stac?note.d*0.5:note.d;return Math.max(1,Math.floor(eff*2));}
+
+// ── Slide core (pure functions) ──────────────────────────────────
+// INVARIANT: durations.length===2*targets.length+1; sum(durations)===total;
+// hold(even idx)>=0; slide(odd idx)>=1. All mutation goes through these fns.
+function slIsSlideIdx(i){return i%2===1;}
+function slMinForIdx(i){return slIsSlideIdx(i)?1:0;}
+function slMinTotal(n){return n;}
+function slNormalize(slide,totalSteps){
+  const n=slide.targets.length;
+  let durs=slide.durations?slide.durations.slice():[];
+  const wantLen=2*n+1;
+  while(durs.length<wantLen)durs.push(0);
+  if(durs.length>wantLen)durs=durs.slice(0,wantLen);
+  for(let i=0;i<durs.length;i++)durs[i]=Math.max(slMinForIdx(i),Math.floor(durs[i]||0));
+  const floor=slMinTotal(n);
+  const target=Math.max(totalSteps,floor);
+  let sum=durs.reduce((a,b)=>a+b,0);
+  if(sum<target){durs[0]+=(target-sum);}
+  else if(sum>target){
+    let excess=sum-target;
+    for(let i=durs.length-1;i>=0&&excess>0;i--){if(!slIsSlideIdx(i)){const take=Math.min(durs[i],excess);durs[i]-=take;excess-=take;}}
+    for(let i=durs.length-1;i>=0&&excess>0;i--){if(slIsSlideIdx(i)){const take=Math.min(durs[i]-1,excess);durs[i]-=take;excess-=take;}}
+  }
+  return{targets:slide.targets.slice(),durations:durs,total:target};
+}
+function slCreate(targetFret,totalSteps){return slNormalize({targets:[targetFret],durations:[0,1,0]},totalSteps);}
+function slAddTarget(slide,newFret,totalSteps){
+  const targets=slide.targets.concat([newFret]);
+  const durations=slide.durations.concat([1,0]);
+  const norm=slNormalize({targets,durations},totalSteps);
+  return{slide:{targets:norm.targets,durations:norm.durations},newTotalSteps:norm.total};
+}
+function slRemoveTarget(slide,i,totalSteps){
+  const targets=slide.targets.slice();targets.splice(i,1);
+  let durs=slide.durations.slice();
+  const slideIdx=2*i+1,holdIdx=2*i+2;
+  const removed=(durs[slideIdx]||0)+(durs[holdIdx]||0);
+  durs.splice(slideIdx,2);durs[2*i]=(durs[2*i]||0)+removed;
+  if(targets.length===0)return{slide:null,newTotalSteps:totalSteps};
+  const norm=slNormalize({targets,durations:durs},totalSteps);
+  return{slide:{targets:norm.targets,durations:norm.durations},newTotalSteps:norm.total};
+}
+function slNormalizeAbsorb(slide,totalSteps,lockedIdx){
+  let durs=slide.durations.slice();
+  for(let i=0;i<durs.length;i++)durs[i]=Math.max(slMinForIdx(i),Math.floor(durs[i]||0));
+  let sum=durs.reduce((a,b)=>a+b,0);
+  let diff=totalSteps-sum;
+  if(diff>0){
+    let placed=false;
+    for(let i=0;i<durs.length&&!placed;i++){if(!slIsSlideIdx(i)&&i!==lockedIdx){durs[i]+=diff;placed=true;}}
+    if(!placed)durs[0]+=diff;
+  } else if(diff<0){
+    let excess=-diff;
+    for(let i=durs.length-1;i>=0&&excess>0;i--){if(!slIsSlideIdx(i)&&i!==lockedIdx){const take=Math.min(durs[i],excess);durs[i]-=take;excess-=take;}}
+    for(let i=durs.length-1;i>=0&&excess>0;i--){if(slIsSlideIdx(i)&&i!==lockedIdx){const take=Math.min(durs[i]-1,excess);durs[i]-=take;excess-=take;}}
+    if(excess>0&&!slIsSlideIdx(lockedIdx)){const take=Math.min(durs[lockedIdx],excess);durs[lockedIdx]-=take;excess-=take;}
+  }
+  return{targets:slide.targets.slice(),durations:durs};
+}
+function slSetDuration(slide,idx,value,totalSteps){
+  let durs=slide.durations.slice();
+  const minv=slMinForIdx(idx);
+  value=Math.max(minv,Math.floor(value||0));
+  let othersMin=0;
+  for(let i=0;i<durs.length;i++)if(i!==idx)othersMin+=slMinForIdx(i);
+  value=Math.min(value,Math.max(minv,totalSteps-othersMin));
+  durs[idx]=value;
+  const norm=slNormalizeAbsorb({targets:slide.targets.slice(),durations:durs},totalSteps,idx);
+  return{slide:{targets:norm.targets,durations:norm.durations},newTotalSteps:totalSteps};
+}
+
+// ── Audio init ─────────────────────────────────────────────────────
+function initAudio(){
+  if(!actx||actx.state==='closed'){
+    actx=new(window.AudioContext||window.webkitAudioContext)();
+    mgain=actx.createGain();mgain.gain.value=vol;
+    mgain.connect(actx.destination);
+  }
+  return actx;
+}
+function getM(){initAudio();return mgain}
+
+// Kill all audio immediately – use AudioContext suspend then resume
+function silenceNow(){
+  if(!actx)return;
+  // Ramp to zero in 15ms then restore
+  const g=mgain.gain;
+  g.cancelScheduledValues(actx.currentTime);
+  g.setValueAtTime(g.value,actx.currentTime);
+  g.linearRampToValueAtTime(0.0001,actx.currentTime+0.015);
+  setTimeout(()=>{if(mgain){mgain.gain.cancelScheduledValues(actx.currentTime);mgain.gain.setValueAtTime(vol,actx.currentTime);}},25);
+}
+
+// ── Bass synth ─────────────────────────────────────────────────────
+function makeBassSeamless(ctx,t0,dur,freqSched,vib){
+  if(dur<=0)return;
+  const mg=getM();
+  const tri=ctx.createOscillator();tri.type='triangle';
+  const sub=ctx.createOscillator();sub.type='sine';
+  const subG=ctx.createGain();subG.gain.value=0.3;sub.connect(subG);
+  for(let i=0;i<freqSched.length;i++){
+    const{t,f,gl}=freqSched[i];const at=t0+t;
+    if(gl&&i>0){tri.frequency.linearRampToValueAtTime(f,at);sub.frequency.linearRampToValueAtTime(f/2,at);}
+    else{tri.frequency.setValueAtTime(f,at);sub.frequency.setValueAtTime(f/2,at);}
+  }
+  if(vib){const lfo=ctx.createOscillator();const lG=ctx.createGain();lfo.frequency.value=5.5;lG.gain.value=3.5;lfo.connect(lG);lG.connect(tri.frequency);lG.connect(sub.frequency);lfo.start(t0);lfo.stop(t0+dur+0.15);}
+  // Attack noise
+  const asz=Math.floor(ctx.sampleRate*0.018);const abuf=ctx.createBuffer(1,asz,ctx.sampleRate);
+  const ad=abuf.getChannelData(0);for(let i=0;i<asz;i++)ad[i]=(Math.random()*2-1)*(1-i/asz);
+  const asrc=ctx.createBufferSource();asrc.buffer=abuf;
+  const abp=ctx.createBiquadFilter();abp.type='bandpass';abp.frequency.value=freqSched[0].f*2;abp.Q.value=1;
+  const aG=ctx.createGain();aG.gain.setValueAtTime(0.35,t0);aG.gain.exponentialRampToValueAtTime(0.001,t0+0.018);
+  asrc.connect(abp);abp.connect(aG);aG.connect(mg);asrc.start(t0);asrc.stop(t0+0.02);
+  const ws=ctx.createWaveShaper();
+  ws.curve=(()=>{const n=128,c=new Float32Array(n);for(let i=0;i<n;i++){const x=i*2/n-1;c[i]=x*(1+0.8*Math.abs(x))/(1+0.8);}return c;})();
+  ws.oversample='2x';
+  const lpf=ctx.createBiquadFilter();lpf.type='lowpass';lpf.frequency.value=800;lpf.Q.value=1.2;
+  const shelf=ctx.createBiquadFilter();shelf.type='highshelf';shelf.frequency.value=1200;shelf.gain.value=-8;
+  const mix=ctx.createGain();mix.gain.value=1;
+  tri.connect(ws);ws.connect(mix);subG.connect(mix);mix.connect(lpf);lpf.connect(shelf);
+  const amp=ctx.createGain();shelf.connect(amp);amp.connect(mg);
+  const atk=0.006,dec=Math.min(0.09,dur*0.15),sus=0.65,rel=Math.min(0.1,dur*0.08);
+  amp.gain.setValueAtTime(0,t0);amp.gain.linearRampToValueAtTime(0.9,t0+atk);
+  amp.gain.exponentialRampToValueAtTime(sus,t0+atk+dec);
+  amp.gain.setValueAtTime(sus,t0+Math.max(atk+dec,dur-rel));
+  amp.gain.exponentialRampToValueAtTime(0.001,t0+dur+0.03);
+  [tri,sub].forEach(o=>{o.start(t0);o.stop(t0+dur+0.06);});
+}
+
+function playBass(f,dur,vib,startTime){const ctx=initAudio();makeBassSeamless(ctx,startTime??ctx.currentTime,dur,[{t:0,f,gl:false}],vib||false)}
+
+// Build freqSched from note.fret + note.slide.durations and play seamlessly.
+// durations are in 32nd-note steps; convert each to seconds via hss().
+function playSlide(strs,si,note,totalDurSec,startTime){
+  const ctx=initAudio();const t0=startTime??ctx.currentTime;
+  const baseMidi=strs[si].m;
+  const slide=note.slide;
+  const allFrets=[note.fret,...slide.targets];
+  const durs=slide.durations;
+  const totalSteps=durs.reduce((a,b)=>a+b,0);
+  const secPerStep=totalSteps>0?totalDurSec/totalSteps:0;
+  let t=0;const sched=[];
+  // Initial frequency at t=0 (start of first hold)
+  sched.push({t:0,f:m2f(baseMidi+allFrets[0]),gl:false});
+  for(let seg=0;seg<durs.length;seg++){
+    const segSec=durs[seg]*secPerStep;
+    if(slIsSlideIdx(seg)){
+      const fromFret=allFrets[(seg-1)/2];
+      const toFret=allFrets[(seg+1)/2];
+      // Anchor the frequency flat at the moment the slide begins, so the
+      // preceding hold segment does NOT get absorbed into the ramp's time span.
+      sched.push({t:t,f:m2f(baseMidi+fromFret),gl:false});
+      sched.push({t:t+segSec,f:m2f(baseMidi+toFret),gl:true});
+    }
+    t+=segSec;
+  }
+  makeBassSeamless(ctx,t0,totalDurSec,sched,!!note.vib);
+}
+
+function playGhost(om,startTime){
+  const ctx=initAudio();const mg=getM();const t=startTime??ctx.currentTime;
+  const f=m2f(om||28),tf=Math.min(f*.8,120);
+  const th=ctx.createOscillator();th.type='sine';th.frequency.value=tf;
+  const thG=ctx.createGain();thG.gain.setValueAtTime(2.6,t);thG.gain.exponentialRampToValueAtTime(.001,t+.09);
+  th.connect(thG);thG.connect(mg);
+  const at=ctx.createOscillator();at.type='triangle';at.frequency.value=f*1.2;
+  const aG=ctx.createGain();aG.gain.setValueAtTime(1.2,t);aG.gain.exponentialRampToValueAtTime(.001,t+.05);
+  at.connect(aG);aG.connect(mg);
+  const bz=Math.floor(ctx.sampleRate*.12);const buf=ctx.createBuffer(1,bz,ctx.sampleRate);
+  const d=buf.getChannelData(0);for(let i=0;i<bz;i++)d[i]=Math.random()*2-1;
+  const src=ctx.createBufferSource();src.buffer=buf;
+  const bp=ctx.createBiquadFilter();bp.type='bandpass';bp.frequency.value=f*1.2;bp.Q.value=.8;
+  const lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=Math.min(f*3,2000);
+  const nG=ctx.createGain();nG.gain.setValueAtTime(1.8,t);nG.gain.exponentialRampToValueAtTime(.001,t+.12);
+  src.connect(bp);bp.connect(lp);lp.connect(nG);nG.connect(mg);
+  th.start(t);th.stop(t+.1);at.start(t);at.stop(t+.06);src.start(t);src.stop(t+.13);
+}
+
+// ── Controls ──────────────────────────────────────────────────────
+function setVol(v){vol=Math.max(0,Math.min(100,v))/100;document.getElementById('volSl').value=Math.round(vol*100);document.getElementById('volV').textContent=Math.round(vol*100);if(mgain)mgain.gain.value=vol;}
+function setTempo(v){tempo=Math.max(40,Math.min(240,v));document.getElementById('tempoSl').value=tempo;document.getElementById('tempoV').textContent=tempo;if(playing){pst=performance.now();psp=ppos;ptempo=tempo;}}
+document.getElementById('tempoSl').addEventListener('input',function(){setTempo(parseInt(this.value))});
+document.getElementById('tm').addEventListener('click',()=>setTempo(tempo-1));
+document.getElementById('tp').addEventListener('click',()=>setTempo(tempo+1));
+document.getElementById('volSl').addEventListener('input',function(){setVol(parseInt(this.value))});
+document.getElementById('vm').addEventListener('click',()=>setVol(Math.round(vol*100)-1));
+document.getElementById('vp').addEventListener('click',()=>setVol(Math.round(vol*100)+1));
+document.getElementById('barsToggle').addEventListener('click',function(){svgBPL=svgBPL===4?2:4;this.textContent=svgBPL===4?'2小節表示':'4小節表示';renderSvg();});
+document.getElementById('scrollToggle').addEventListener('click',function(){autoSc=!autoSc;this.textContent=autoSc?'自動スクロール ON':'自動スクロール OFF';this.classList.toggle('active',autoSc);});
+
+// ── Note utility ───────────────────────────────────────────────────
+function nOwner(si,step){for(let s=Math.max(0,step-32);s<=step;s++){const n=notes[nk(si,s)];if(n&&s+Math.ceil(dispS(n))>step)return s;}return null;}
+
+// ── Export/Import ──────────────────────────────────────────────────
+function packNote(n){
+  const o={};
+  if(n.fret!=null)o.f=n.fret;o.d=n.d;
+  if(n.ghost)o.g=1;if(n.dot)o.do=1;if(n.stac)o.st=1;if(n.vib)o.v=1;o.si=n.si;
+  if(n.slide)o.sl={t:n.slide.targets,d:n.slide.durations};
+  return o;
+}
+function unpackNote(o){
+  return{fret:o.f??null,d:o.d||4,ghost:!!o.g,dot:!!o.do,stac:!!o.st,vib:!!o.v,si:o.si||0,
+    slide:o.sl?{targets:o.sl.t,durations:o.sl.d}:null};
+}
+function expData(){
+  const ns={};Object.entries(notes).forEach(([k,v])=>ns[k]=packNote(v));
+  return btoa(unescape(encodeURIComponent(JSON.stringify({v:13,ts:tSig,tp:tempo,ns:nStr,b:bars,vl:Math.round(vol*100),n:ns}))));
+}
+function impData(code){
+  const j=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
+  if(!j||!j.v)throw new Error('invalid');
+  tSig=j.ts||4;tempo=j.tp||80;nStr=j.ns||4;bars=j.b||1;
+  document.getElementById('timeSig').value=tSig;document.getElementById('stringSel').value=nStr;
+  setTempo(tempo);if(j.vl!=null)setVol(j.vl);
+  notes={};if(j.n)Object.entries(j.n).forEach(([k,v])=>notes[k]=unpackNote(v));
+  stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
+}
+document.getElementById('exportBtn').addEventListener('click',()=>{document.getElementById('ioTa').value=expData();showMsg('エクスポートしました',false);});
+document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
+document.getElementById('copyBtn').addEventListener('click',()=>{const ta=document.getElementById('ioTa');if(!ta.value){showMsg('先にエクスポートしてください',true);return;}navigator.clipboard.writeText(ta.value).then(()=>showMsg('コピーしました',false)).catch(()=>{ta.select();document.execCommand('copy');showMsg('コピーしました',false);});});
+function showMsg(msg,isErr){const el=document.getElementById('ioMsg');el.textContent=msg;el.className=isErr?'io-err':'io-ok';setTimeout(()=>el.textContent='',4000);}
+
+// ── Popup ──────────────────────────────────────────────────────────
+let activePop=null;
+function closePop(){if(activePop){activePop.remove();activePop=null;}}
+
+function openPop(si,step,mx,my){
+  closePop();
+  const strs=gStr();const ex=notes[nk(si,step)];
+  const pop=document.createElement('div');pop.className='pop';
+
+  // Title row
+  const tr=document.createElement('div');tr.className='pop-tr';
+  const te=document.createElement('div');te.className='pop-title';te.textContent=`${strs[si].n}弦 / step ${step+1}`;
+  const cb=document.createElement('div');cb.className='pop-cbs';
+  const cpB=document.createElement('button');cpB.className='btn sm';cpB.textContent='📋';cpB.title='コピー';
+  const ptB=document.createElement('button');ptB.className='btn sm';ptB.textContent='📌';ptB.title='ペースト';
+  ptB.style.opacity=clip?'1':'.4';ptB.disabled=!clip;
+  cb.appendChild(cpB);cb.appendChild(ptB);tr.appendChild(te);tr.appendChild(cb);pop.appendChild(tr);
+
+  // Two-column layout
+  const inner=document.createElement('div');inner.className='pop-inner';
+  const pLeft=document.createElement('div');pLeft.className='pop-left';
+  const pRight=document.createElement('div');pRight.className='pop-right';
+  inner.appendChild(pLeft);inner.appendChild(pRight);pop.appendChild(inner);
+
+  let isDot=!!(ex?.dot),isStac=!!(ex?.stac);
+  let tech=ex?(ex.ghost?'ghost':ex.slide?'slide':ex.vib?'vib':'none'):'none';
+  // Working copy of slide state (deep copy)
+  let slideState=ex?.slide?{targets:ex.slide.targets.slice(),durations:ex.slide.durations.slice()}:null;
+
+  // ── Left column ──
+  const fF=document.createElement('div');fF.className='pop-field';
+  const fL=document.createElement('label');fL.textContent='フレット（0〜24）';
+  const fI=document.createElement('input');fI.type='number';fI.min=0;fI.max=24;
+  fI.value=(ex&&!ex.ghost)?ex.fret:'';fI.placeholder='0';
+  fI.addEventListener('wheel',e=>e.preventDefault(),{passive:false});
+  fF.appendChild(fL);fF.appendChild(fI);pLeft.appendChild(fF);
+
+  const dF=document.createElement('div');dF.className='pop-field';
+  const dLbl=document.createElement('label');dLbl.textContent='音の長さ';
+  const dS=document.createElement('select');
+  const curDurVal=ex?Number(ex.d):DDUR;
+  const isStdDur=DURS.some(d=>d.v===curDurVal);
+  DURS.forEach(d=>{const o=document.createElement('option');o.value=String(d.v);o.textContent=d.l;if(isStdDur&&curDurVal===d.v)o.selected=true;dS.appendChild(o);});
+  const customOpt=document.createElement('option');customOpt.value='custom';customOpt.textContent='長さを入力する';
+  if(!isStdDur)customOpt.selected=true;
+  dS.appendChild(customOpt);
+  dF.appendChild(dLbl);dF.appendChild(dS);
+  // Custom duration number input (shown only when "custom" selected)
+  const dCustomWrap=document.createElement('div');dCustomWrap.style.cssText='margin-top:5px;display:'+(!isStdDur?'block':'none');
+  const dCustomLbl=document.createElement('label');dCustomLbl.style.cssText='font-size:10px;color:var(--text3);display:block;margin-bottom:2px';dCustomLbl.textContent='長さ（16分音符いくつ分）';
+  const dCustomInp=document.createElement('input');dCustomInp.type='number';dCustomInp.min=1;dCustomInp.style.cssText='width:70px;font-size:13px;padding:3px 6px;';
+  dCustomInp.value=String(curDurVal);
+  dCustomInp.addEventListener('wheel',e=>e.preventDefault(),{passive:false});
+  dCustomWrap.appendChild(dCustomLbl);dCustomWrap.appendChild(dCustomInp);
+  dF.appendChild(dCustomWrap);
+  pLeft.appendChild(dF);
+
+  // Unified getter for the current duration value (number, always >=1)
+  function getCurDurVal(){
+    if(dS.value==='custom'){
+      return Math.max(1,parseInt(dCustomInp.value)||1);
+    }
+    return Number(dS.value)||DDUR;
+  }
+  // If custom input value matches a standard option, auto-switch select to it
+  function syncCustomToStandard(){
+    const v=Math.max(1,parseInt(dCustomInp.value)||1);
+    dCustomInp.value=String(v);
+    const match=DURS.find(d=>d.v===v);
+    if(match){
+      dS.value=String(match.v);
+      dCustomWrap.style.display='none';
+    }
+    renderSlideUI();
+  }
+  dS.addEventListener('change',()=>{
+    dCustomWrap.style.display=(dS.value==='custom')?'block':'none';
+    if(dS.value==='custom')dCustomInp.focus();
+    renderSlideUI();
+  });
+  dCustomInp.addEventListener('change',syncCustomToStandard);
+  dCustomInp.addEventListener('blur',syncCustomToStandard);
+
+  const aS=document.createElement('div');aS.className='mod-sec';
+  const aL=document.createElement('div');aL.className='mod-sec-lbl';aL.textContent='アーティキュレーション';
+  const aR=document.createElement('div');aR.className='mod-row';
+  const dB=mkB('♩.','符点');const sB=mkB('·','スタッカート');
+  aR.appendChild(dB);aR.appendChild(sB);aS.appendChild(aL);aS.appendChild(aR);pLeft.appendChild(aS);
+
+  const tS=document.createElement('div');tS.className='mod-sec';
+  const tL=document.createElement('div');tL.className='mod-sec-lbl';tL.textContent='奏法（いずれか一つ）';
+  const tR=document.createElement('div');tR.className='mod-row';
+  const gB=mkB('×','ゴースト');const slB=mkB('/\\','スライド');const vB=mkB('~','ビブラート');
+  tR.appendChild(gB);tR.appendChild(slB);tR.appendChild(vB);tS.appendChild(tL);tS.appendChild(tR);pLeft.appendChild(tS);
+  function mkB(icon,label){const e=document.createElement('button');e.className='mod-btn off';e.innerHTML=`<span class="mi">${icon}</span><span class="ml">${label}</span>`;return e;}
+
+  // ── Right column: slide settings ──
+  const rTitle=document.createElement('div');rTitle.className='pop-right-title';rTitle.textContent='スライド設定';pRight.appendChild(rTitle);
+  const destListEl=document.createElement('div');destListEl.className='slide-dest-list';pRight.appendChild(destListEl);
+  const addRow=document.createElement('div');addRow.className='sdest-add-row';pRight.appendChild(addRow);
+  const zonePanel=document.createElement('div');zonePanel.className='zone-panel';zonePanel.style.marginTop='8px';
+  const zonePanelTitle=document.createElement('div');zonePanelTitle.className='zone-panel-title';zonePanel.appendChild(zonePanelTitle);
+  const zonePanelRows=document.createElement('div');zonePanel.appendChild(zonePanelRows);
+  const zoneDiag=document.createElement('div');zoneDiag.className='zone-diagram';zonePanel.appendChild(zoneDiag);
+  pRight.appendChild(zonePanel);
+
+  function safeF(f){return(f!=null&&!isNaN(f)&&f>=0&&f<=24)?String(f):'?';}
+  function curTotalSteps(){return gmxFor({d:getCurDurVal(),dot:isDot,stac:isStac});}
+
+  // Ensure slideState exists & is normalized to current totalSteps
+  function ensureSlideState(){
+    const total=curTotalSteps();
+    if(!slideState){
+      const baseFret=parseInt(fI.value);
+      slideState=slCreate(isNaN(baseFret)?0:0,total); // placeholder target; will be set via UI (null fret allowed visually)
+      // We actually want target fret to start as null (unset) in UI but core needs a number.
+      // Use 0 as internal placeholder; UI shows blank until user types, then we update via setTargetFret.
+      slideState.targets=[null];
+    } else {
+      // re-normalize to current total (in case duration changed)
+      const safeTargets=slideState.targets.map(t=>t==null?0:t);
+      const norm=slNormalize({targets:safeTargets,durations:slideState.durations},total);
+      slideState={targets:slideState.targets.slice(),durations:norm.durations}; // keep null markers, only durations updated
+    }
+  }
+
+  function setTargetFret(i,val){
+    slideState.targets[i]=val;
+  }
+
+  function renderSlideUI(){
+    if(tech!=='slide'){pRight.classList.remove('vis');return;}
+    pRight.classList.add('vis');
+    ensureSlideState();
+    const total=curTotalSteps();
+    const baseFret=parseInt(fI.value);
+    const allFretsDisplay=[isNaN(baseFret)?null:baseFret,...slideState.targets];
+
+    // Destination list
+    destListEl.innerHTML='';
+    slideState.targets.forEach((tgt,i)=>{
+      const row=document.createElement('div');row.className='sdest-row';
+      const lbl=document.createElement('div');lbl.className='sdest-lbl';lbl.textContent=`→ ${i+1}:`;
+      const inp=document.createElement('input');inp.type='number';inp.className='sdest-inp';inp.min=0;inp.max=24;
+      if(tgt!=null)inp.value=String(tgt);
+      inp.placeholder='0〜24';
+      inp.addEventListener('wheel',e=>e.preventDefault(),{passive:false});
+      function commit(){
+        const v=parseInt(inp.value);
+        setTargetFret(i,(isNaN(v)||v<0||v>24)?null:v);
+        renderSlideUI(); // refresh labels (zone panel) without losing other state
+      }
+      inp.addEventListener('change',commit);
+      inp.addEventListener('blur',commit);
+      inp.addEventListener('keydown',e=>{if(e.key==='Enter')commit();}); // commit before bubbling to global confirm
+      const rmB=document.createElement('div');rmB.className='sdest-rm';rmB.textContent='×';rmB.title='削除';
+      rmB.addEventListener('click',()=>{
+        const r=slRemoveTarget({targets:slideState.targets.map(t=>t==null?0:t),durations:slideState.durations},i,total);
+        if(r.slide===null){ slideState=null; tech='none'; refAll(); return; }
+        // Preserve null markers for targets that are still null after removal (shift indices)
+        const newTargets=slideState.targets.slice();newTargets.splice(i,1);
+        slideState={targets:newTargets,durations:r.slide.durations};
+        renderSlideUI();
+      });
+      row.appendChild(lbl);row.appendChild(inp);row.appendChild(rmB);
+      destListEl.appendChild(row);
+    });
+
+    // Add button — only enabled if last target has a valid fret (or list empty... but list never empty in 'slide' tech)
+    addRow.innerHTML='';
+    const lastT=slideState.targets[slideState.targets.length-1];
+    const canAdd=(lastT!=null);
+    const addB=document.createElement('button');addB.className='btn sm';addB.textContent='＋ スライド先を追加';
+    addB.disabled=!canAdd;addB.style.opacity=canAdd?'1':'.4';
+    addB.addEventListener('click',()=>{
+      if(!canAdd)return;
+      const safeTargets=slideState.targets.map(t=>t==null?0:t);
+      const r=slAddTarget({targets:safeTargets,durations:slideState.durations},0,total);
+      slideState={targets:[...slideState.targets,null],durations:r.slide.durations};
+      renderSlideUI();
+    });
+    addRow.appendChild(addB);
+
+    // Zone panel: one row per duration slot
+    const n=slideState.targets.length;
+    zonePanelTitle.textContent=`区間設定（32分音符 合計${total}個）`;
+    zonePanelRows.innerHTML='';
+    const safeTargets=slideState.targets.map(t=>t==null?0:t);
+    const allF=[isNaN(baseFret)?0:baseFret,...safeTargets];
+    slideState.durations.forEach((val,idx)=>{
+      const isSlide=slIsSlideIdx(idx);
+      let label;
+      if(isSlide){
+        const fromF=allFretsDisplay[(idx-1)/2],toF=allFretsDisplay[(idx+1)/2];
+        const fromS=safeF(fromF),toS=safeF(toF);
+        const arrow=(fromF!=null&&toF!=null&&toF<fromF)?'\\':'/';
+        label=`${fromS}${arrow}${toS} のスライド長さ`;
+      } else {
+        const fr=allFretsDisplay[idx/2];
+        label=`${safeF(fr)} の長さ`;
+      }
+      const row=document.createElement('div');row.className='zone-row';
+      row.style.cssText='display:flex;align-items:center;gap:3px;margin-bottom:3px;min-width:0;';
+      const lb=document.createElement('div');
+      lb.style.cssText='font-size:10px;color:var(--text2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:2px;';
+      lb.textContent=label;row.appendChild(lb);
+
+      const mB=document.createElement('button');mB.className='step-btn';mB.style.flexShrink='0';mB.textContent='−';
+      const inp=document.createElement('input');inp.type='number';inp.className='zone-num-inp';inp.min=isSlide?1:0;inp.style.cssText='width:28px;flex-shrink:0;';inp.value=val;
+      inp.addEventListener('wheel',e=>e.preventDefault(),{passive:false});
+      const pB=document.createElement('button');pB.className='step-btn';pB.style.flexShrink='0';pB.textContent='＋';
+      const un=document.createElement('div');un.style.cssText='font-size:9px;color:var(--text3);flex-shrink:0;white-space:nowrap;';un.textContent='個';
+
+      function doSet(raw){
+        const r=slSetDuration({targets:safeTargets,durations:slideState.durations},idx,parseInt(raw)||0,total);
+        slideState={targets:slideState.targets.slice(),durations:r.slide.durations};
+        renderSlideUI();
+      }
+      mB.addEventListener('click',()=>doSet((slideState.durations[idx]||0)-1));
+      pB.addEventListener('click',()=>doSet((slideState.durations[idx]||0)+1));
+      inp.addEventListener('change',()=>doSet(inp.value));
+      inp.addEventListener('blur',()=>doSet(inp.value));
+      row.appendChild(mB);row.appendChild(inp);row.appendChild(pB);row.appendChild(un);
+      zonePanelRows.appendChild(row);
+    });
+
+    // Diagram bar
+    zoneDiag.innerHTML='';
+    slideState.durations.forEach((val,idx)=>{
+      const seg=document.createElement('div');seg.className='zd-seg '+(slIsSlideIdx(idx)?'zd-slide':'zd-anchor');
+      seg.style.flex=String(Math.max(val,0.001));
+      const fr=slIsSlideIdx(idx)?null:allFretsDisplay[idx/2];
+      seg.textContent=val>0?(fr!=null?safeF(fr):(slIsSlideIdx(idx)?'→':'')):'';
+      seg.title=(slIsSlideIdx(idx)?'スライド':'保持')+': '+val+'個';
+      zoneDiag.appendChild(seg);
+    });
+  }
+
+  function refAll(){
+    dB.className='mod-btn '+(isDot?'on-dot':'off');
+    sB.className='mod-btn '+(isStac?'on-stac':'off');
+    gB.className='mod-btn '+(tech==='ghost'?'on-ghost':'off');
+    slB.className='mod-btn '+(tech==='slide'?'on-slide':'off');
+    vB.className='mod-btn '+(tech==='vib'?'on-vib':'off');
+    fF.classList.toggle('dis',tech==='ghost');if(tech==='ghost')fI.value='';
+    renderSlideUI();
+    requestAnimationFrame(repositionPop);
+  }
+  dB.addEventListener('click',()=>{isDot=!isDot;if(isDot)isStac=false;refAll();});
+  sB.addEventListener('click',()=>{isStac=!isStac;if(isStac)isDot=false;refAll();});
+  gB.addEventListener('click',()=>{tech=tech==='ghost'?'none':'ghost';refAll();});
+  slB.addEventListener('click',()=>{
+    if(tech==='slide'){tech='none';}
+    else{tech='slide';if(!slideState)slideState=null;} // preserve existing slideState across toggles within this session
+    refAll();
+  });
+  vB.addEventListener('click',()=>{tech=tech==='vib'?'none':'vib';refAll();});
+  fI.addEventListener('change',()=>renderSlideUI());
+  fI.addEventListener('blur',()=>renderSlideUI());
+
+  // If editing an existing slide note, restore its state on open (already set above);
+  // but slB click handler resets slideState=null only on fresh toggle-on, so guard:
+  if(ex?.slide){ /* slideState already initialized from ex above */ }
+
+  refAll();
+
+  function buildN(){
+    const d=getCurDurVal();
+    if(tech==='ghost')return{fret:null,d,ghost:true,dot:false,stac:isStac,vib:false,si,slide:null};
+    const fret=parseInt(fI.value);
+    if(tech==='slide'&&slideState){
+      const validTargets=slideState.targets.filter(t=>t!=null);
+      if(validTargets.length===0){
+        return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,slide:null};
+      }
+      // Build final slide with only valid (non-null) targets; durations already match length
+      // If some targets are null (incomplete), we exclude them along with their slide-seg+next-hold,
+      // merging removed steps into preceding hold — same logic as slRemoveTarget, applied from the end.
+      let workTargets=slideState.targets.slice();
+      let workDurs=slideState.durations.slice();
+      for(let i=workTargets.length-1;i>=0;i--){
+        if(workTargets[i]==null){
+          const total=workDurs.reduce((a,b)=>a+b,0);
+          const safeWT=workTargets.map(t=>t==null?0:t);
+          const r=slRemoveTarget({targets:safeWT,durations:workDurs},i,total);
+          workTargets.splice(i,1);
+          workDurs=r.slide?r.slide.durations:[total];
+        }
+      }
+      if(workTargets.length===0){
+        return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,slide:null};
+      }
+      return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,
+        slide:{targets:workTargets,durations:workDurs}};
+    }
+    return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:tech==='vib',si,slide:null};
+  }
+
+  cpB.addEventListener('click',e=>{e.stopPropagation();clip={...buildN()};ptB.disabled=false;ptB.style.opacity='1';cpB.style.color='var(--green)';setTimeout(()=>cpB.style.color='',800);});
+  ptB.addEventListener('click',e=>{
+    e.stopPropagation();if(!clip)return;const cb2=clip;
+    isDot=!!cb2.dot;isStac=!!cb2.stac;
+    tech=cb2.ghost?'ghost':cb2.slide?'slide':cb2.vib?'vib':'none';
+    fI.value=cb2.ghost?'':(cb2.fret!=null?String(cb2.fret):'');
+    const pastedD=cb2.d||DDUR;
+    const pastedIsStd=DURS.some(d=>d.v===pastedD);
+    if(pastedIsStd){dS.value=String(pastedD);dCustomWrap.style.display='none';}
+    else{dS.value='custom';dCustomInp.value=String(pastedD);dCustomWrap.style.display='block';}
+    slideState=cb2.slide?{targets:cb2.slide.targets.slice(),durations:cb2.slide.durations.slice()}:null;
+    refAll();
+  });
+
+  const acts=document.createElement('div');acts.className='pop-acts';pop.appendChild(acts);
+  const okB=document.createElement('button');okB.className='btn sm primary';okB.textContent='確定';
+  function confirm(){
+    if(tech!=='ghost'){const f=parseInt(fI.value);if(isNaN(f)||f<0||f>24){fI.focus();return;}}
+    const note=buildN();const key=nk(si,step);
+    const effD=note.dot?note.d*1.5:note.d;
+    notes[key]=note;ensureB(step+Math.ceil(effD));
+    const dur=durSec(note,tempo);const str=gStr();
+    if(note.ghost)playGhost(str[si].m);
+    else if(note.slide)playSlide(str,si,note,dur);
+    else playBass(m2f(str[si].m+note.fret),dur,note.vib);
+    closePop();buildCanvas();renderSvg();
+  }
+  okB.addEventListener('click',confirm);
+  pop.addEventListener('keydown',e=>{if(e.key==='Enter'&&document.activeElement.tagName!=='SELECT'){e.preventDefault();confirm();}});
+  acts.appendChild(okB);
+  if(ex){const dB2=document.createElement('button');dB2.className='btn sm pop-del';dB2.textContent='削除';dB2.addEventListener('click',()=>{delete notes[nk(si,step)];closePop();buildCanvas();renderSvg();});acts.appendChild(dB2);}
+  const canB=document.createElement('button');canB.className='btn sm';canB.textContent='キャンセル';canB.addEventListener('click',closePop);acts.appendChild(canB);
+
+  document.body.appendChild(pop);activePop=pop;
+
+  function repositionPop(){
+    const isSlideVis=pRight.classList.contains('vis');
+    // pop padding(18*2) + pop-left(250) [+ gap(16) + pop-right(260) when slide visible]
+    const PW=isSlideVis?562:286;
+    pop.style.width=PW+'px';
+    pop.style.maxHeight='none';
+    pop.style.overflow='hidden';
+    const vw=window.innerWidth,vh=window.innerHeight;
+    let popLeft=mx+window.scrollX+12;
+    if(popLeft+PW>vw-4)popLeft=Math.max(4,mx+window.scrollX-PW-8);
+    if(popLeft<4)popLeft=4;
+    pop.style.left=popLeft+'px';
+    const ph=pop.offsetHeight;
+    let popTop=my+window.scrollY-ph/2;
+    if(popTop<4)popTop=4;
+    if(popTop+ph>vh+window.scrollY-4)popTop=Math.max(4,vh+window.scrollY-ph-4);
+    pop.style.top=popTop+'px';
+  }
+  requestAnimationFrame(repositionPop);
+  setTimeout(()=>{if(tech!=='ghost')fI.focus();},50);
+}
+document.addEventListener('click',e=>{if(activePop&&!activePop.contains(e.target))closePop();},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();});
+
+
+function ensureB(n){while(bars*SPB<n)bars++;}
+function resizeN(si,step,delta){
+  const note=notes[nk(si,step)];if(!note)return;
+  const nd=Math.max(1,note.d+delta);
+  const en=note.dot?nd*1.5:nd;
+  for(let s=step+1;s<step+Math.ceil(en);s++){const o=nOwner(si,s);if(o!==null&&o!==step)return;}
+  note.d=nd;
+  if(note.slide){
+    const newTotal=gmxFor(note);
+    const norm=slNormalize({targets:note.slide.targets,durations:note.slide.durations},newTotal);
+    note.slide={targets:norm.targets,durations:norm.durations};
+  }
+  ensureB(step+Math.ceil(dispS(note)));buildCanvas();renderSvg();
+}
+// ── Transport / Playbar ────────────────────────────────────────────
+function updatePbar(){
+  const ts=tSteps();
+  const fill=document.getElementById('pbarFill');
+  const head=document.getElementById('pbarHead');
+  const lbl=document.getElementById('pbarLabel');
+  if(!fill||!head)return;
+  const pct=ts>0?ppos/ts:0;
+  fill.style.width=(pct*100)+'%';
+  head.style.left=(pct*100)+'%';
+  lbl.textContent=`小節 ${Math.floor(ppos/SPB)+1} · step ${(ppos%SPB)+1}`;
+  const svgEl=document.getElementById('pbarMarks');
+  const wrap=document.getElementById('pbarWrap');
+  if(!svgEl||!wrap)return;
+  const W=wrap.offsetWidth||300;
+  let h='';
+  for(let s=0;s<ts;s++){
+    const x=(s/ts)*W;
+    if(s%SPB===0)h+=`<line x1="${x}" y1="0" x2="${x}" y2="28" stroke="rgba(255,255,255,.2)" stroke-width="1.5"/>`;
+    else if(s%(SPB/tSig)===0)h+=`<line x1="${x}" y1="7" x2="${x}" y2="21" stroke="rgba(255,255,255,.1)" stroke-width="1"/>`;
+  }
+  if(loopOn){
+    const ls=(loopSBar!=null?loopSBar-1:0);const le=(loopEBar!=null?loopEBar:bars);
+    const lx1=(ls*SPB/ts)*W,lx2=(le*SPB/ts)*W;
+    h+=`<rect x="${lx1}" y="0" width="${lx2-lx1}" height="28" fill="rgba(26,158,106,.12)"/>`;
+    h+=`<line x1="${lx1}" y1="0" x2="${lx1}" y2="28" stroke="#1a9e6a" stroke-width="1.5"/>`;
+    h+=`<line x1="${lx2}" y1="0" x2="${lx2}" y2="28" stroke="#1a9e6a" stroke-width="1.5"/>`;
+  }
+  svgEl.setAttribute('viewBox',`0 0 ${W} 28`);svgEl.innerHTML=h;
+}
+
+// Playbar scrub
+(function(){
+  const wrap=document.getElementById('pbarWrap');if(!wrap)return;
+  let scrubbing=false,wasPlaying=false;
+  function posFromX(x){
+    const rect=wrap.getBoundingClientRect();const ratio=Math.max(0,Math.min(1,(x-rect.left)/rect.width));
+    const beat=Math.max(1,Math.floor(SPB/tSig));
+    return Math.floor(ratio*tSteps()/beat)*beat;
+  }
+  function startScrub(x){
+    scrubbing=true;wasPlaying=playing;
+    if(playing){playing=false;clearTimeout(ptimer);cancelAnimationFrame(afId);silenceNow();}
+    ppos=posFromX(x);hlStep(ppos);updatePbar();
+    wrap.style.cursor='grabbing';
+  }
+  function moveScrub(x){if(!scrubbing)return;ppos=posFromX(x);hlStep(ppos);updatePbar();}
+  function endScrub(){
+    if(!scrubbing)return;scrubbing=false;wrap.style.cursor='pointer';
+    if(wasPlaying)resumeFrom(ppos);else{document.getElementById('statusTxt').textContent='一時停止中 (小節 '+(Math.floor(ppos/SPB)+1)+')';}
+  }
+  wrap.addEventListener('mousedown',e=>{e.preventDefault();startScrub(e.clientX);});
+  document.addEventListener('mousemove',e=>{if(scrubbing)moveScrub(e.clientX);});
+  document.addEventListener('mouseup',()=>endScrub());
+  wrap.addEventListener('touchstart',e=>{e.preventDefault();startScrub(e.touches[0].clientX);},{passive:false});
+  document.addEventListener('touchmove',e=>{if(scrubbing)moveScrub(e.touches[0].clientX);},{passive:false});
+  document.addEventListener('touchend',()=>endScrub());
+})();
+
+// ── Lookahead scheduler (drift-free) ────────────────────────────────
+// Naive recursive setTimeout chains drift slower than the real tempo because
+// each call's JS execution time (audio scheduling + DOM updates) gets added
+// on top of the requested delay, and that error accumulates over time.
+// Instead we anchor playback to the AudioContext's own sample-accurate clock
+// (ctx.currentTime) and schedule notes ahead of time; a lightweight timer
+// merely polls whether it's time to push more notes into the lookahead window.
+const SCHED_AHEAD_SEC=0.12; // how far ahead of "now" we schedule audio
+const SCHED_POLL_MS=25;     // how often the scheduler polls
+let nextStepTime=0;
+
+function resumeFrom(pos){
+  ppos=pos;initAudio();actx.resume().then(()=>{
+    playing=true;ptempo=tempo;pst=performance.now();psp=ppos;
+    document.getElementById('playBtn').textContent='⏸ 一時停止';
+    document.getElementById('sdot').classList.add('playing');
+    document.getElementById('statusTxt').textContent='再生中...';
+    animPH();
+    nextStepTime=actx.currentTime+0.05;
+    scheduler();
+  });
+}
+function scheduler(){
+  if(!playing)return;
+  while(nextStepTime<actx.currentTime+SCHED_AHEAD_SEC){
+    const playingStep=ppos;
+    const fireAt=nextStepTime;
+    playStep(playingStep,fireAt);
+    const delayMs=Math.max(0,(fireAt-actx.currentTime)*1000);
+    setTimeout(()=>{
+      if(!playing)return; // stale callback from before a pause/stop — ignore
+      hlStep(playingStep);
+      pst=performance.now();psp=playingStep;ptempo=tempo;
+      updatePbar();
+    },delayMs);
+    const stepDurSec=(60/tempo)*0.25; // 16th-note duration at the tempo in effect when this step is scheduled
+    nextStepTime+=stepDurSec;
+    let next=playingStep+1;
+    if(loopOn){
+      const ts=tSteps();
+      const ls=(loopSBar!=null?Math.max(0,(loopSBar-1)*SPB):0);
+      const le=(loopEBar!=null?Math.min(ts,loopEBar*SPB):ts);
+      if(next>=le)next=ls;
+    } else {
+      if(next>=tSteps())next=0;
+    }
+    ppos=next;
+  }
+  ptimer=setTimeout(scheduler,SCHED_POLL_MS);
+}
+
+function startPlay(fromStart){
+  if(playing){
+    playing=false;clearTimeout(ptimer);cancelAnimationFrame(afId);
+    silenceNow();
+    document.getElementById('playBtn').textContent='▶ 再生';
+    document.getElementById('sdot').classList.remove('playing');
+    document.getElementById('statusTxt').textContent='一時停止中 (小節 '+(Math.floor(ppos/SPB)+1)+')';
+    return;
+  }
+  if(fromStart){ppos=loopOn&&loopSBar!=null?(loopSBar-1)*SPB:0;}
+  // If loop on, ensure ppos is within loop range
+  if(loopOn){
+    const ts=tSteps();
+    const ls=(loopSBar!=null?(loopSBar-1)*SPB:0);
+    const le=(loopEBar!=null?Math.min(ts,loopEBar*SPB):ts);
+    if(ppos<ls||ppos>=le)ppos=ls;
+  }
+  resumeFrom(ppos);
+}
+function stopPlay(){
+  playing=false;clearTimeout(ptimer);hidePH();
+  silenceNow();
+  document.getElementById('playBtn').textContent='▶ 再生';
+  document.getElementById('sdot').classList.remove('playing');
+  document.getElementById('statusTxt').textContent='停止中';
+  hlStep(-1);updatePbar();
+}
+function skipBars(delta){
+  const wasP=playing;
+  if(playing){playing=false;clearTimeout(ptimer);cancelAnimationFrame(afId);silenceNow();}
+  const newBar=Math.max(0,Math.min(bars-1,Math.floor(ppos/SPB)+delta));
+  ppos=newBar*SPB;hlStep(ppos);updatePbar();
+  if(wasP)resumeFrom(ppos);
+  else document.getElementById('statusTxt').textContent='一時停止中 (小節 '+(newBar+1)+')';
+}
+
+// Loop controls
+document.getElementById('loopBtn').addEventListener('click',function(){
+  loopOn=!loopOn;
+  this.textContent=loopOn?'🔁 ループ ON':'🔁 ループ OFF';
+  this.classList.toggle('on-loop',loopOn);
+  document.getElementById('loopRow').style.display=loopOn?'flex':'none';
+  updatePbar();
+});
+function clampLoopInputs(){
+  const lsEl=document.getElementById('loopStart');const leEl=document.getElementById('loopEnd');
+  if(lsEl.value!==''){const v=Math.max(1,Math.min(bars,parseInt(lsEl.value)||1));lsEl.value=v;loopSBar=v;}else loopSBar=null;
+  if(leEl.value!==''){const v=Math.max(1,Math.min(bars,parseInt(leEl.value)||bars));leEl.value=v;loopEBar=v;}else loopEBar=null;
+  updatePbar();
+  // If loop is on and currently playing outside the new range, jump to loop start immediately
+  if(loopOn&&playing){
+    const ts=tSteps();
+    const ls=(loopSBar!=null?(loopSBar-1)*SPB:0);
+    const le=(loopEBar!=null?Math.min(ts,loopEBar*SPB):ts);
+    if(ppos<ls||ppos>=le){
+      playing=false;clearTimeout(ptimer);cancelAnimationFrame(afId);
+      silenceNow();
+      resumeFrom(ls);
+    }
+  } else if(loopOn&&!playing){
+    // Paused: update ppos to loop start so next play starts there
+    const ts=tSteps();
+    const ls=(loopSBar!=null?(loopSBar-1)*SPB:0);
+    const le=(loopEBar!=null?Math.min(ts,loopEBar*SPB):ts);
+    if(ppos<ls||ppos>=le){
+      ppos=ls;hlStep(ppos);updatePbar();
+    }
+  }
+}
+document.getElementById('loopStart').addEventListener('input',clampLoopInputs);
+document.getElementById('loopEnd').addEventListener('input',clampLoopInputs);
+
+// Transport buttons
+document.getElementById('playBtn').addEventListener('click',()=>startPlay(false));
+document.getElementById('rewindBtn').addEventListener('click',()=>{stopPlay();ppos=0;hlStep(0);updatePbar();});
+document.getElementById('skipBarBack').addEventListener('click',()=>skipBars(-1));
+document.getElementById('skipBarFwd').addEventListener('click',()=>skipBars(+1));
+document.getElementById('skip4Back').addEventListener('click',()=>skipBars(-4));
+document.getElementById('skip4Fwd').addEventListener('click',()=>skipBars(+4));
+document.getElementById('clearBtn').addEventListener('click',()=>{stopPlay();notes={};ppos=0;bars=1;buildCanvas();renderSvg();updatePbar();});
+document.getElementById('timeSig').addEventListener('change',function(){tSig=parseInt(this.value);stopPlay();notes={};ppos=0;buildCanvas();renderSvg();updatePbar();});
+// String count change: keep notes, remove notes for strings that no longer exist
+document.getElementById('stringSel').addEventListener('change',function(){
+  const newN=parseInt(this.value);
+  if(newN<nStr){
+    // Remove notes for strings that don't exist anymore
+    Object.keys(notes).forEach(k=>{const si=parseInt(k.split(':')[0]);if(si>=newN)delete notes[k];});
+  }
+  nStr=newN;stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
+});
+
+// ── Playhead anim ─────────────────────────────────────────────────
+function animPH(){
+  if(!playing){cancelAnimationFrame(afId);return;}
+  const el=(performance.now()-pst)/1000,sd=(60/ptempo)*.25,pos=(psp+el/sd);
+  const ts=tSteps();const safePos=((pos%ts)+ts)%ts;
+  const CW=getCW(),cpl=svgBPL*SPB,NS=gStr().length;
+  const li=Math.floor(safePos/cpl),ci=safePos%cpl,cx=SVG_LP+ci*CW,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
+  const svg=document.getElementById('tabSvg');
+  if(svg){
+    let ln=svg.querySelector('.svgph');
+    if(!ln){ln=document.createElementNS('http://www.w3.org/2000/svg','line');ln.classList.add('svgph');ln.setAttribute('stroke','#2a7fd4');ln.setAttribute('stroke-width','1.5');svg.appendChild(ln);}
+    ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+SVG_SG-12);ln.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);ln.setAttribute('opacity','1');
+    if(autoSc){const w=document.getElementById('tabViewScroll');if(w){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.8)w.scrollTo({top:tY,behavior:'smooth'});}}
+  }
+  afId=requestAnimationFrame(animPH);
+}
+function hidePH(){cancelAnimationFrame(afId);const s=document.getElementById('tabSvg');if(s){const l=s.querySelector('.svgph');if(l)l.setAttribute('opacity','0');}}
+function updGP(step){for(let b=0;b<bars;b++){const ph=document.getElementById('ph-b-'+b);if(!ph)continue;const bs=b*SPB;if(step>=0&&step>=bs&&step<bs+SPB){ph.style.left=((step-bs)*SW+SW/2-1)+'px';ph.classList.add('visible');}else ph.classList.remove('visible');}}
+// Statically position the SVG preview playhead line at a given step (used when not actively playing,
+// e.g. after skip/rewind/scrub while paused). Does not animate — animPH() handles smooth motion during playback.
+function updateSvgPH(step){
+  const svg=document.getElementById('tabSvg');if(!svg)return;
+  if(step<0){const l=svg.querySelector('.svgph');if(l)l.setAttribute('opacity','0');return;}
+  const CW=getCW(),cpl=svgBPL*SPB,NS=gStr().length;
+  const ts=tSteps();const safePos=((step%ts)+ts)%ts;
+  const li=Math.floor(safePos/cpl),ci=safePos%cpl,cx=SVG_LP+ci*CW,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
+  let ln=svg.querySelector('.svgph');
+  if(!ln){ln=document.createElementNS('http://www.w3.org/2000/svg','line');ln.classList.add('svgph');ln.setAttribute('stroke','#2a7fd4');ln.setAttribute('stroke-width','1.5');svg.appendChild(ln);}
+  ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+SVG_SG-12);ln.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);ln.setAttribute('opacity','1');
+  if(autoSc){const w=document.getElementById('tabViewScroll');if(w){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.8)w.scrollTo({top:tY,behavior:'smooth'});}}
+}
+
+
+// ── Canvas ─────────────────────────────────────────────────────────
+function buildCanvas(){
+  const cv=document.getElementById('tabCanvas');cv.innerHTML='';
+  const strs=gStr();const NS=strs.length;const spb=SPB/tSig;
+  const grid=document.createElement('div');grid.className='tab-grid-wrap';
+  const sl=document.createElement('div');sl.className='string-labels';
+  strs.forEach((s,si)=>{const l=document.createElement('div');l.className='string-lbl'+(si===NS-1?' low':'');l.textContent=s.n;sl.appendChild(l);});
+  grid.appendChild(sl);const ba=document.createElement('div');ba.className='bars-area';
+  for(let b=0;b<bars;b++){
+    const bb=document.createElement('div');bb.className='bar-block';
+    const bh=document.createElement('div');bh.className='bar-header';
+    const bLbl=document.createElement('span');bLbl.textContent='小節 '+(b+1);bh.appendChild(bLbl);
+    const bcB=document.createElement('span');bcB.className='bar-act';bcB.textContent='📋';bcB.title='小節をコピー';
+    bcB.addEventListener('click',e=>{e.stopPropagation();copyBar(b);});bh.appendChild(bcB);
+    const bpB=document.createElement('span');bpB.className='bar-act'+(barClip?'':' dis');bpB.textContent='📌';bpB.title='小節にペースト';
+    bpB.addEventListener('click',e=>{e.stopPropagation();if(barClip)pasteBar(b);});bh.appendChild(bpB);
+    if(bars>1){const x=document.createElement('span');x.className='bar-del';x.textContent='×';x.addEventListener('click',e=>{e.stopPropagation();delBar(b);});bh.appendChild(x);}
+    bb.appendChild(bh);const sr=document.createElement('div');sr.className='steps-row';
+    const ph=document.createElement('div');ph.className='playhead';ph.id='ph-b-'+b;ph.style.cssText='top:0;height:100%';sr.appendChild(ph);
+    for(let s=0;s<SPB;s++){
+      const step=b*SPB+s;const col=document.createElement('div');col.className='step-col'+(s%spb===0&&s>0?' beat':'');col.id='sc-'+step;
+      if(playing&&ppos===step)col.classList.add('playing');
+      strs.forEach((_,si)=>{const lane=document.createElement('div');lane.className='string-lane';const line=document.createElement('div');line.className='string-line';lane.appendChild(line);lane.addEventListener('click',e=>{e.stopPropagation();if(nOwner(si,step)!==null)return;openPop(si,step,e.clientX,e.clientY);});col.appendChild(lane);});
+      sr.appendChild(col);
+    }
+    strs.forEach((_,si)=>{
+      for(let s=0;s<SPB;s++){
+        const step=b*SPB+s;const note=notes[nk(si,step)];if(!note)continue;
+        const ds=dispS(note);const W=Math.max(28,ds*SW-4);const solidW=note.stac?Math.max(14,W/2):W;
+        const blk=document.createElement('div');blk.className='note-block'+(note.ghost?' ghost':'')+(playing&&ppos===step?' playing':'');
+        blk.id='nb-'+si+'-'+step;blk.style.cssText=`left:${s*SW+2}px;top:${si*44+8}px;width:${W}px`;
+        if(note.dot&&!note.ghost){const bp=note.d*SW-4;const df=document.createElement('div');df.className='dot-fade';df.style.width=Math.max(4,W-Math.max(28,bp))+'px';blk.appendChild(df);}
+        if(note.stac){const sg=document.createElement('div');sg.className='stac-ghost';sg.style.width=(W-solidW)+'px';blk.appendChild(sg);}
+        if(note.vib){const vl=document.createElement('div');vl.className='vib-lbl';vl.textContent='~';blk.appendChild(vl);}
+        if(note.slide&&W>16){
+          const durs=note.slide.durations;const totalD=durs.reduce((a,b)=>a+b,0)||1;
+          let acc=0;
+          durs.forEach((val,idx)=>{
+            const segW=(val/totalD)*solidW;
+            const seg=document.createElement('div');seg.className='slide-seg '+(slIsSlideIdx(idx)?'slide':'hold');
+            seg.style.cssText=`left:${acc}px;width:${segW}px`;
+            blk.appendChild(seg);acc+=segW;
+          });
+        }
+        const inn=document.createElement('div');inn.className='note-inner';inn.style.cssText=`left:0;width:${solidW}px`;
+        if(note.ghost){const fx=document.createElement('div');fx.className='note-fret';fx.textContent='×';inn.appendChild(fx);}
+        else{
+          const ff=document.createElement('div');ff.className='note-fret';
+          const stdDurs=[1,2,4,8,16];
+          let durSuffix='';
+          if(note.dot) durSuffix='.';
+          else if(!stdDurs.includes(note.d)) durSuffix=`(${note.d})`;
+          let fretTxt=String(note.fret);
+          if(note.slide){
+            fretTxt+=note.slide.targets.map(t=>(t>note.fret?'↗':'↘')+t).join('');
+          }
+          ff.textContent=fretTxt+(durSuffix?` ${durSuffix}`:'');
+          ff.style.fontSize=ff.textContent.length>5?'8px':ff.textContent.length>4?'9px':'12px';
+          inn.appendChild(ff);
+        }
+        blk.appendChild(inn);
+        if(ds>1){const rl=document.createElement('div');rl.className='rh rh-l';rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
+        const rr=document.createElement('div');rr.className='rh rh-r';rr.textContent='▶';rr.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,+1);});blk.appendChild(rr);
+        blk.addEventListener('click',e=>{if(e.target.classList.contains('rh'))return;e.stopPropagation();openPop(si,step,e.clientX,e.clientY);});
+        sr.appendChild(blk);
+      }
+    });
+    bb.appendChild(sr);ba.appendChild(bb);
+  }
+  const ab=document.createElement('button');ab.className='add-bar-btn';ab.textContent='+';ab.addEventListener('click',addBar);ba.appendChild(ab);
+  grid.appendChild(ba);cv.appendChild(grid);if(playing)updGP(ppos);
+}
+
+function addBar(){bars++;clampLoopInputs();buildCanvas();renderSvg();updatePbar();}
+function delBar(b){
+  if(playing)stopPlay();const s0=b*SPB,e0=s0+SPB;const nn={};
+  Object.entries(notes).forEach(([k,v])=>{const[si,step]=[parseInt(k.split(':')[0]),parseInt(k.split(':')[1])];if(step<s0)nn[k]=v;else if(step>=e0)nn[si+':'+(step-SPB)]=v;});
+  notes=nn;bars=Math.max(1,bars-1);ppos=Math.min(ppos,tSteps()-1);clampLoopInputs();buildCanvas();renderSvg();updatePbar();
+}
+// Deep-copy a note object (including its slide sub-object) for clipboard use
+function deepCopyNote(n){
+  return{...n, slide:n.slide?{targets:n.slide.targets.slice(),durations:n.slide.durations.slice()}:null};
+}
+function copyBar(b){
+  const s0=b*SPB,e0=s0+SPB;
+  const barNotes=[]; // [{si, localStep, note}]
+  Object.entries(notes).forEach(([k,v])=>{
+    const[si,step]=[parseInt(k.split(':')[0]),parseInt(k.split(':')[1])];
+    if(step>=s0&&step<e0)barNotes.push({si,localStep:step-s0,note:deepCopyNote(v)});
+  });
+  barClip={notes:barNotes,tSig,nStr};
+  buildCanvas(); // refresh paste-button enabled state across all bars
+}
+function pasteBar(b){
+  if(!barClip)return;
+  const s0=b*SPB,e0=s0+SPB;
+  // Clear existing notes whose onset is within the target bar
+  Object.keys(notes).forEach(k=>{const[,step]=[parseInt(k.split(':')[0]),parseInt(k.split(':')[1])];if(step>=s0&&step<e0)delete notes[k];});
+  let maxEnd=e0;
+  barClip.notes.forEach(({si,localStep,note})=>{
+    if(si>=gStr().length)return; // skip strings that don't exist on the current string count
+    const newStep=s0+localStep;
+    const placed=deepCopyNote(note);
+    notes[nk(si,newStep)]=placed;
+    maxEnd=Math.max(maxEnd,newStep+Math.ceil(dispS(placed)));
+  });
+  ensureB(maxEnd);
+  buildCanvas();renderSvg();updatePbar();
+}
+
+function playStep(step,startTime){
+  const strs=gStr();
+  for(let si=0;si<strs.length;si++){
+    const note=notes[nk(si,step)];if(!note)continue;
+    if(note.ghost){playGhost(strs[Math.min(note.si??si,strs.length-1)].m,startTime);continue;}
+    const dur=durSec(note,tempo);
+    if(note.slide)playSlide(strs,si,note,dur,startTime);
+    else playBass(m2f(strs[si].m+note.fret),dur,note.vib,startTime);
+  }
+}
+function hlStep(step){
+  for(let c=0;c<tSteps();c++){const col=document.getElementById('sc-'+c);if(col)col.classList.toggle('playing',c===step&&step>=0);}
+  gStr().forEach((_,si)=>{for(let s=0;s<tSteps();s++){
+    const bl=document.getElementById('nb-'+si+'-'+s);if(bl)bl.classList.toggle('playing',s===step&&step>=0);
+    const svgn=document.getElementById('svgn-'+si+'-'+s);if(svgn)svgn.classList.toggle('playing',s===step&&step>=0);
+    const conts=document.querySelectorAll(`[data-owner="${si}-${s}"]`);
+    conts.forEach(c=>c.classList.toggle('playing',s===step&&step>=0));
+  }});
+  updGP(step);
+  // Only move the static SVG playhead here when not actively animating (animPH owns it during playback)
+  if(!playing)updateSvgPH(step);
+}
+
+// ── SVG Preview ────────────────────────────────────────────────────
+function renderSvg(){
+  const svg=document.getElementById('tabSvg');if(!svg)return;
+  const strs=gStr();const NS=strs.length;const CW=getCW();const cpl=svgBPL*SPB;const tot=tSteps();
+  const nL=Math.max(1,Math.ceil(tot/cpl));const LH=NS*SVG_SG+44;const W=SVG_LP+cpl*CW+SVG_RP;const H=nL*LH+SVG_TP;
+  const lc='rgba(255,255,255,.1)',blc='rgba(255,255,255,.35)',lbc='rgba(255,255,255,.3)',nc='#2a7fd4',pc='#e8a020';
+  let h='';
+  for(let line=0;line<nL;line++){
+    const ly=SVG_TP+line*LH;const sc=line*cpl;
+    for(let si=0;si<NS;si++){const sy=ly+si*SVG_SG+SVG_SG;h+=`<line x1="${SVG_LP}" y1="${sy}" x2="${SVG_LP+cpl*CW}" y2="${sy}" stroke="${lc}" stroke-width="1"/>`;h+=`<text x="${SVG_LP-3}" y="${sy+4}" text-anchor="end" font-size="11" fill="${lbc}" font-family="monospace">${strs[si].n}</text>`;}
+    for(let bar=0;bar<=svgBPL;bar++){const bx=SVG_LP+bar*SPB*CW;h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${blc}" stroke-width="1.5"/>`;if(bar<svgBPL){const bn=line*svgBPL+bar+1;h+=`<text x="${bx+2}" y="${ly+SVG_SG-7}" font-size="9" fill="${lbc}">${bn}</text>`;}}
+    for(let ci=0;ci<cpl;ci++){const step=sc+ci;if(step>=tot)break;if(step%(SPB/tSig)===0&&step%SPB!==0){const bx=SVG_LP+ci*CW;h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${lc}" stroke-width=".6" stroke-dasharray="2,2"/>`;}}
+    // Draw continuations of notes that started in a PREVIOUS line and still sustain into this one
+    for(let si=0;si<NS;si++){
+      let contStep=null,contNote=null;
+      for(let s=Math.max(0,sc-64);s<sc;s++){
+        const n=notes[nk(si,s)];
+        if(n&&!n.ghost&&s+Math.ceil(dispS(n))>sc){contStep=s;contNote=n;}
+      }
+      if(contNote==null)continue;
+      const sy=ly+si*SVG_SG+SVG_SG;
+      const solidEndStep=contStep+contNote.d;          // end of the un-dotted portion
+      const fullEndStep=contStep+dispS(contNote);       // end including dot extension
+      const lineEndStep=sc+cpl;
+      const drawEnd=Math.min(fullEndStep,lineEndStep,tot);
+      if(drawEnd<=sc)continue;
+      const baseOpacity=contNote.stac?.18:.45;
+      const solidDrawEnd=Math.min(solidEndStep,drawEnd);
+      if(solidDrawEnd>sc){
+        const x1=SVG_LP,x2=SVG_LP+(solidDrawEnd-sc)*CW;
+        h+=`<g class="svgn" data-owner="${si}-${contStep}"><line x1="${x1}" y1="${sy}" x2="${x2}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${baseOpacity}"/></g>`;
+      }
+      if(drawEnd>solidEndStep){
+        const dx1=SVG_LP+Math.max(0,solidEndStep-sc)*CW,dx2=SVG_LP+(drawEnd-sc)*CW;
+        h+=`<g class="svgn" data-owner="${si}-${contStep}"><line x1="${dx1}" y1="${sy}" x2="${dx2}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/></g>`;
+      }
+    }
+    for(let ci=0;ci<cpl;ci++){
+      const step=sc+ci;if(step>=tot)break;const cx=SVG_LP+ci*CW+CW/2;
+      for(let si=0;si<NS;si++){
+        const note=notes[nk(si,step)];if(!note)continue;
+        const ig=!!note.ghost,ds=dispS(note),id=!!note.dot,ist=!!note.stac,iv=!!note.vib;
+        const sy=ly+si*SVG_SG+SVG_SG,r=CW===10?7:9;
+        h+=`<g class="svgn" id="svgn-${si}-${step}">`;
+        if(ig){h+=`<text x="${cx}" y="${sy+4}" text-anchor="middle" font-size="12" font-weight="500" fill="currentColor" font-family="monospace">×</text>`;}
+        else{
+          let fs=String(note.fret);
+          if(note.slide)fs+=note.slide.targets.map(t=>(t>note.fret?'/':'\\')+t).join('');
+          h+=`<rect x="${cx-r}" y="${sy-r}" width="${r*2}" height="${r*2}" rx="${r}" fill="currentColor"/>`;
+          const fsz=fs.length>4?(CW===10?5:7):fs.length>2?(CW===10?6:8):(CW===10?8:11);
+          h+=`<text x="${cx}" y="${sy+3}" text-anchor="middle" font-size="${fsz}" font-weight="500" fill="white" font-family="monospace">${fs}</text>`;
+          if(id)h+=`<text x="${cx+r+2}" y="${sy-r+2}" font-size="9" font-weight="700" fill="currentColor">.</text>`;
+          if(iv)h+=`<text x="${cx}" y="${sy-r-3}" text-anchor="middle" font-size="8" fill="currentColor">~</text>`;
+          if(ist)h+=`<text x="${cx}" y="${sy+r+8}" text-anchor="middle" font-size="8" fill="currentColor">·</text>`;
+          if(ds>1){const bd=note.d,bE=Math.min(step+bd-1-sc,cpl-1),bX=SVG_LP+bE*CW+CW/2+r;if(bX>cx+r+1)h+=`<line x1="${cx+r+1}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${ist?.18:.45}"/>`;if(id){const dE=Math.min(step+ds-1-sc,cpl-1),dX=SVG_LP+dE*CW+CW/2+r;if(dX>bX)h+=`<line x1="${bX}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/>`;}}
+        }
+        h+=`</g>`;
+      }
+    }
+  }
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('width',W);svg.setAttribute('height',H);svg.innerHTML=h;
+  const wrap=document.getElementById('tabViewScroll');if(wrap){const tH=LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=nL>2?'auto':'hidden';}
+}
+
+buildCanvas();renderSvg();
+setTimeout(updatePbar,100);
+</script>
+</body>
+</html>
