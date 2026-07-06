@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google-site-verification" content="zrvaRkCMaoIkopVidZuH9JteueUaKaNOmAluN2LMt9w" />
 <title>Bass Tab Editor</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -169,6 +170,13 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .io-ok{font-size:10px;color:var(--green)}
 .io-err{font-size:10px;color:var(--red)}
 .status-bar{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:11px;color:var(--text3)}
+/* My tabs list */
+.mytab-row{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;flex-wrap:wrap}
+.mytab-title{flex:1;font-size:13px;color:var(--text);min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mytab-date{font-size:10px;color:var(--text3);white-space:nowrap}
+.mytab-acts{display:flex;gap:4px;flex-shrink:0}
+.mytab-acts .btn{padding:4px 8px;font-size:11px}
+.mytab-empty{font-size:12px;color:var(--text3);padding:8px 0}
 .sdot{width:7px;height:7px;border-radius:50%;background:var(--border2);transition:background .1s}
 .sdot.playing{background:var(--green)}
 </style>
@@ -177,6 +185,11 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="app">
 <div class="topbar">
   <h1>🎸 Bass Tab Editor</h1>
+  <div id="acctArea" style="display:flex;gap:8px;align-items:center;margin-right:10px">
+    <span class="lbl" id="acctStatus">未ログイン</span>
+    <button class="btn sm" id="loginBtn">ログイン</button>
+    <button class="btn sm" id="logoutBtn" style="display:none">ログアウト</button>
+  </div>
   <div style="display:flex;gap:8px;align-items:center">
     <span class="lbl">弦数</span>
     <select id="stringSel"><option value="4" selected>4弦</option><option value="5">5弦</option><option value="6">6弦</option></select>
@@ -240,6 +253,19 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
     <button class="btn sm primary" id="importBtn">↓ インポート</button>
     <button class="btn sm" id="copyBtn">コピー</button>
     <span id="ioMsg"></span>
+  </div>
+</div>
+<div class="divider"><span>クラウド保存</span><hr></div>
+<div class="io-panel" id="cloudPanel">
+  <div class="io-panel-title" id="cloudHint">ログインすると、タブ譜をクラウドに保存できます。</div>
+  <div id="cloudLoggedInArea" style="display:none">
+    <div class="io-row" style="margin-top:0">
+      <input type="text" id="saveTitleInp" placeholder="タブ譜のタイトル" style="flex:1;min-width:140px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:5px;padding:6px 9px;font-size:13px">
+      <button class="btn sm primary" id="cloudSaveBtn">☁ 保存</button>
+      <span id="cloudMsg"></span>
+    </div>
+    <div class="divider" style="margin:12px 0 8px"><span>マイタブ譜</span><hr></div>
+    <div id="myTabsList" style="display:flex;flex-direction:column;gap:6px"></div>
   </div>
 </div>
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
@@ -497,6 +523,102 @@ document.getElementById('exportBtn').addEventListener('click',()=>{document.getE
 document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
 document.getElementById('copyBtn').addEventListener('click',()=>{const ta=document.getElementById('ioTa');if(!ta.value){showMsg('先にエクスポートしてください',true);return;}navigator.clipboard.writeText(ta.value).then(()=>showMsg('コピーしました',false)).catch(()=>{ta.select();document.execCommand('copy');showMsg('コピーしました',false);});});
 function showMsg(msg,isErr){const el=document.getElementById('ioMsg');el.textContent=msg;el.className=isErr?'io-err':'io-ok';setTimeout(()=>el.textContent='',4000);}
+
+// ── Cloud account & save (Supabase) ─────────────────────────────────
+const SUPABASE_URL='https://xmqeomwreakrfxzbgcop.supabase.co';
+const SUPABASE_KEY='sb_publishable_aMNheXOvR7XCRP-ACT5AFg_8TzKQnVc';
+// Named sbClient (not "supabase") to avoid colliding with the global `supabase`
+// object that the CDN script attaches to window.
+const sbClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+function cloudMsg(msg,isErr){const el=document.getElementById('cloudMsg');if(!el)return;el.textContent=msg;el.style.color=isErr?'var(--red)':'var(--green)';el.style.fontSize='11px';setTimeout(()=>{el.textContent='';},4000);}
+
+async function refreshAuthUI(){
+  const{data:{session}}=await sbClient.auth.getSession();
+  const statusEl=document.getElementById('acctStatus');
+  const loginBtn=document.getElementById('loginBtn');
+  const logoutBtn=document.getElementById('logoutBtn');
+  const hint=document.getElementById('cloudHint');
+  const loggedInArea=document.getElementById('cloudLoggedInArea');
+  if(session&&session.user){
+    const email=session.user.email||'ログイン中';
+    statusEl.textContent=email;
+    loginBtn.style.display='none';
+    logoutBtn.style.display='';
+    hint.style.display='none';
+    loggedInArea.style.display='block';
+    loadMyTabs();
+  } else {
+    statusEl.textContent='未ログイン';
+    loginBtn.style.display='';
+    logoutBtn.style.display='none';
+    hint.style.display='';
+    loggedInArea.style.display='none';
+  }
+}
+document.getElementById('loginBtn').addEventListener('click',async()=>{
+  const{error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}});
+  if(error)cloudMsg('ログインに失敗しました',true);
+});
+document.getElementById('logoutBtn').addEventListener('click',async()=>{
+  await sbClient.auth.signOut();
+  refreshAuthUI();
+});
+sbClient.auth.onAuthStateChange((_event,_session)=>{refreshAuthUI();});
+
+async function cloudSave(){
+  const{data:{session}}=await sbClient.auth.getSession();
+  if(!session){cloudMsg('ログインしてください',true);return;}
+  const titleInp=document.getElementById('saveTitleInp');
+  const title=titleInp.value.trim()||'無題のタブ譜';
+  const code=expData();
+  const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title,code});
+  if(error){cloudMsg('保存に失敗しました',true);return;}
+  titleInp.value='';
+  cloudMsg('保存しました',false);
+  loadMyTabs();
+}
+document.getElementById('cloudSaveBtn').addEventListener('click',cloudSave);
+
+async function loadMyTabs(){
+  const listEl=document.getElementById('myTabsList');
+  const{data:{session}}=await sbClient.auth.getSession();
+  if(!session)return;
+  const{data,error}=await sbClient.from('tabs').select('id,title,code,updated_at').eq('user_id',session.user.id).order('updated_at',{ascending:false});
+  listEl.innerHTML='';
+  if(error){listEl.innerHTML='<div class="mytab-empty">読み込みに失敗しました</div>';return;}
+  if(!data||data.length===0){listEl.innerHTML='<div class="mytab-empty">保存されたタブ譜はまだありません</div>';return;}
+  data.forEach(row=>{
+    const r=document.createElement('div');r.className='mytab-row';
+    const t=document.createElement('div');t.className='mytab-title';t.textContent=row.title;
+    const d=document.createElement('div');d.className='mytab-date';
+    const dt=new Date(row.updated_at);d.textContent=`${dt.getFullYear()}/${dt.getMonth()+1}/${dt.getDate()}`;
+    const acts=document.createElement('div');acts.className='mytab-acts';
+    const openB=document.createElement('button');openB.className='btn sm';openB.textContent='開く';
+    openB.addEventListener('click',()=>{
+      try{impData(row.code);showMsg('読み込みました',false);}catch(e){cloudMsg('読み込みに失敗しました（データが壊れている可能性があります）',true);}
+    });
+    const dupB=document.createElement('button');dupB.className='btn sm';dupB.textContent='複製';
+    dupB.addEventListener('click',async()=>{
+      const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title:row.title+' のコピー',code:row.code});
+      if(error)cloudMsg('複製に失敗しました',true);else{cloudMsg('複製しました',false);loadMyTabs();}
+    });
+    const copyB=document.createElement('button');copyB.className='btn sm';copyB.textContent='コードをコピー';
+    copyB.addEventListener('click',()=>{
+      navigator.clipboard.writeText(row.code).then(()=>cloudMsg('コードをコピーしました',false)).catch(()=>cloudMsg('コピーに失敗しました',true));
+    });
+    const delB=document.createElement('button');delB.className='btn sm pop-del';delB.textContent='削除';
+    delB.addEventListener('click',async()=>{
+      if(!confirm(`「${row.title}」を削除します。よろしいですか？`))return;
+      const{error}=await sbClient.from('tabs').delete().eq('id',row.id);
+      if(error)cloudMsg('削除に失敗しました',true);else{cloudMsg('削除しました',false);loadMyTabs();}
+    });
+    acts.appendChild(openB);acts.appendChild(dupB);acts.appendChild(copyB);acts.appendChild(delB);
+    r.appendChild(t);r.appendChild(d);r.appendChild(acts);
+    listEl.appendChild(r);
+  });
+}
+refreshAuthUI();
 
 // ── Popup ──────────────────────────────────────────────────────────
 let activePop=null;
