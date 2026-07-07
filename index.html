@@ -606,6 +606,14 @@ async function loadMyTabs(){
     openB.addEventListener('click',()=>{
       try{impData(row.code);showMsg('読み込みました',false);}catch(e){cloudMsg('読み込みに失敗しました（データが壊れている可能性があります）',true);}
     });
+    const overB=document.createElement('button');overB.className='btn sm';overB.textContent='上書き保存';
+    overB.title='今開いているタブ譜の内容で、このタブ譜を上書きします';
+    overB.addEventListener('click',async()=>{
+      if(!confirm(`「${row.title}」を、今開いている内容で上書き保存します。よろしいですか？`))return;
+      const code=expData();
+      const{error}=await sbClient.from('tabs').update({code,updated_at:new Date().toISOString()}).eq('id',row.id);
+      if(error)cloudMsg('上書き保存に失敗しました',true);else{cloudMsg('上書き保存しました',false);loadMyTabs();}
+    });
     const dupB=document.createElement('button');dupB.className='btn sm';dupB.textContent='複製';
     dupB.addEventListener('click',async()=>{
       const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title:row.title+' のコピー',code:row.code});
@@ -621,7 +629,7 @@ async function loadMyTabs(){
       const{error}=await sbClient.from('tabs').delete().eq('id',row.id);
       if(error)cloudMsg('削除に失敗しました',true);else{cloudMsg('削除しました',false);loadMyTabs();}
     });
-    acts.appendChild(openB);acts.appendChild(dupB);acts.appendChild(copyB);acts.appendChild(delB);
+    acts.appendChild(openB);acts.appendChild(overB);acts.appendChild(dupB);acts.appendChild(copyB);acts.appendChild(delB);
     r.appendChild(t);r.appendChild(d);r.appendChild(acts);
     listEl.appendChild(r);
   });
