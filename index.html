@@ -533,6 +533,12 @@ const sbClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
 function cloudMsg(msg,isErr){const el=document.getElementById('cloudMsg');if(!el)return;el.textContent=msg;el.style.color=isErr?'var(--red)':'var(--green)';el.style.fontSize='11px';setTimeout(()=>{el.textContent='';},4000);}
 
+// Always redirect back to a clean URL (no leftover query/hash from a
+// previous OAuth round-trip). Using window.location.href directly can
+// carry stale auth params/fragments into the next login attempt and
+// cause it to silently fail.
+function cleanAppUrl(){return window.location.origin+window.location.pathname;}
+
 async function refreshAuthUI(){
   const{data:{session}}=await sbClient.auth.getSession();
   const statusEl=document.getElementById('acctStatus');
@@ -557,11 +563,13 @@ async function refreshAuthUI(){
   }
 }
 document.getElementById('loginBtn').addEventListener('click',async()=>{
-  const{error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}});
-  if(error)cloudMsg('ログインに失敗しました',true);
+  const{error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:cleanAppUrl()}});
+  if(error){console.error('signInWithOAuth error:',error);cloudMsg('ログインに失敗しました: '+error.message,true);}
 });
 document.getElementById('logoutBtn').addEventListener('click',async()=>{
-  await sbClient.auth.signOut();
+  if(!confirm('ログアウトします。よろしいですか？'))return;
+  const{error}=await sbClient.auth.signOut();
+  if(error){console.error('signOut error:',error);cloudMsg('ログアウトに失敗しました',true);return;}
   refreshAuthUI();
 });
 sbClient.auth.onAuthStateChange((_event,_session)=>{refreshAuthUI();});
