@@ -205,6 +205,13 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   <span class="val"><span id="tempoV">80</span> BPM</span>
 </div>
 <div class="row">
+  <span class="lbl">再生速度</span>
+  <button class="btn" id="spm">−</button>
+  <input type="range" id="speedSl" min="0.25" max="2" step="0.05" value="1">
+  <button class="btn" id="spp">＋</button>
+  <span class="val"><span id="speedV">1.00</span>x</span>
+</div>
+<div class="row">
   <span class="lbl">音量</span>
   <button class="btn" id="vm">−</button>
   <input type="range" id="volSl" min="0" max="100" value="50">
@@ -285,10 +292,14 @@ const SVG_LP=30,SVG_TP=22,SVG_SG=24,SVG_RP=12;
 let svgBPL=4,autoSc=true;
 function getCW(){return svgBPL===4?10:20}
 
-let actx=null,mgain=null;
 let playing=false,ptimer=null,ppos=0;
 let afId=null,pst=0,psp=0,ptempo=80;
-let tSig=4,tempo=80,nStr=4,bars=1,vol=0.5;
+let tSig=4,tempo=80,nStr=4,bars=1,vol=1,playbackSpeed=1;
+// Effective tempo used for all audio scheduling/timing math. Playback speed
+// is independent of the displayed BPM: it scales timing only. Since pitch
+// (frequency) is set directly via m2f() rather than derived from duration,
+// changing this does NOT alter pitch — only how fast events play out.
+function effTempo(){return tempo*playbackSpeed;}
 let notes={},clip=null,barClip=null;
 let loopOn=false,loopSBar=null,loopEBar=null;
 
@@ -373,11 +384,21 @@ function slSetDuration(slide,idx,value,totalSteps){
 }
 
 // ── Audio init ─────────────────────────────────────────────────────
+let actx=null,mgain=null,limiter=null;
 function initAudio(){
   if(!actx||actx.state==='closed'){
     actx=new(window.AudioContext||window.webkitAudioContext)();
     mgain=actx.createGain();mgain.gain.value=vol;
-    mgain.connect(actx.destination);
+    // Limiter: prevents harsh crackling/clipping when the volume boost pushes
+    // the signal above 0dBFS (e.g. several overlapping notes at high gain).
+    limiter=actx.createDynamicsCompressor();
+    limiter.threshold.setValueAtTime(-6,actx.currentTime);
+    limiter.knee.setValueAtTime(0,actx.currentTime);
+    limiter.ratio.setValueAtTime(20,actx.currentTime);
+    limiter.attack.setValueAtTime(0.003,actx.currentTime);
+    limiter.release.setValueAtTime(0.1,actx.currentTime);
+    mgain.connect(limiter);
+    limiter.connect(actx.destination);
   }
   return actx;
 }
@@ -480,14 +501,23 @@ function playGhost(om,startTime){
 }
 
 // ── Controls ──────────────────────────────────────────────────────
-function setVol(v){vol=Math.max(0,Math.min(100,v))/100;document.getElementById('volSl').value=Math.round(vol*100);document.getElementById('volV').textContent=Math.round(vol*100);if(mgain)mgain.gain.value=vol;}
-function setTempo(v){tempo=Math.max(40,Math.min(240,v));document.getElementById('tempoSl').value=tempo;document.getElementById('tempoV').textContent=tempo;if(playing){pst=performance.now();psp=ppos;ptempo=tempo;}}
+function setVol(v){vol=Math.max(0,Math.min(100,v))/50;document.getElementById('volSl').value=Math.round(vol*50);document.getElementById('volV').textContent=Math.round(vol*50);if(mgain)mgain.gain.value=vol;}
+function setTempo(v){tempo=Math.max(40,Math.min(240,v));document.getElementById('tempoSl').value=tempo;document.getElementById('tempoV').textContent=tempo;if(playing){pst=performance.now();psp=ppos;ptempo=effTempo();}}
 document.getElementById('tempoSl').addEventListener('input',function(){setTempo(parseInt(this.value))});
+function setSpeed(v){
+  playbackSpeed=Math.round(Math.max(0.25,Math.min(2,v))*20)/20; // snap to 0.05 steps, avoid float drift
+  document.getElementById('speedSl').value=playbackSpeed;
+  document.getElementById('speedV').textContent=playbackSpeed.toFixed(2);
+  if(playing){pst=performance.now();psp=ppos;ptempo=effTempo();}
+}
+document.getElementById('speedSl').addEventListener('input',function(){setSpeed(parseFloat(this.value))});
+document.getElementById('spm').addEventListener('click',()=>setSpeed(playbackSpeed-0.05));
+document.getElementById('spp').addEventListener('click',()=>setSpeed(playbackSpeed+0.05));
 document.getElementById('tm').addEventListener('click',()=>setTempo(tempo-1));
 document.getElementById('tp').addEventListener('click',()=>setTempo(tempo+1));
 document.getElementById('volSl').addEventListener('input',function(){setVol(parseInt(this.value))});
-document.getElementById('vm').addEventListener('click',()=>setVol(Math.round(vol*100)-1));
-document.getElementById('vp').addEventListener('click',()=>setVol(Math.round(vol*100)+1));
+document.getElementById('vm').addEventListener('click',()=>setVol(Math.round(vol*50)-1));
+document.getElementById('vp').addEventListener('click',()=>setVol(Math.round(vol*50)+1));
 document.getElementById('barsToggle').addEventListener('click',function(){svgBPL=svgBPL===4?2:4;this.textContent=svgBPL===4?'2小節表示':'4小節表示';renderSvg();});
 document.getElementById('scrollToggle').addEventListener('click',function(){autoSc=!autoSc;this.textContent=autoSc?'自動スクロール ON':'自動スクロール OFF';this.classList.toggle('active',autoSc);});
 
@@ -508,7 +538,7 @@ function unpackNote(o){
 }
 function expData(){
   const ns={};Object.entries(notes).forEach(([k,v])=>ns[k]=packNote(v));
-  return btoa(unescape(encodeURIComponent(JSON.stringify({v:13,ts:tSig,tp:tempo,ns:nStr,b:bars,vl:Math.round(vol*100),n:ns}))));
+  return btoa(unescape(encodeURIComponent(JSON.stringify({v:13,ts:tSig,tp:tempo,ns:nStr,b:bars,vl:Math.round(vol*50),n:ns}))));
 }
 function impData(code){
   const j=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
@@ -532,6 +562,12 @@ const SUPABASE_KEY='sb_publishable_aMNheXOvR7XCRP-ACT5AFg_8TzKQnVc';
 const sbClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
 function cloudMsg(msg,isErr){const el=document.getElementById('cloudMsg');if(!el)return;el.textContent=msg;el.style.color=isErr?'var(--red)':'var(--green)';el.style.fontSize='11px';setTimeout(()=>{el.textContent='';},4000);}
+
+// Always redirect back to a clean URL (no leftover query/hash from a
+// previous OAuth round-trip). Using window.location.href directly can
+// carry stale auth params/fragments into the next login attempt and
+// cause it to silently fail.
+function cleanAppUrl(){return window.location.origin+window.location.pathname;}
 
 async function refreshAuthUI(){
   const{data:{session}}=await sbClient.auth.getSession();
@@ -557,20 +593,41 @@ async function refreshAuthUI(){
   }
 }
 document.getElementById('loginBtn').addEventListener('click',async()=>{
-  const{error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.href}});
-  if(error)cloudMsg('ログインに失敗しました',true);
+  const{error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:cleanAppUrl()}});
+  if(error){console.error('signInWithOAuth error:',error);cloudMsg('ログインに失敗しました: '+error.message,true);}
 });
 document.getElementById('logoutBtn').addEventListener('click',async()=>{
-  await sbClient.auth.signOut();
+  if(!confirm('ログアウトします。よろしいですか？'))return;
+  const{error}=await sbClient.auth.signOut();
+  if(error){console.error('signOut error:',error);cloudMsg('ログアウトに失敗しました',true);return;}
   refreshAuthUI();
 });
 sbClient.auth.onAuthStateChange((_event,_session)=>{refreshAuthUI();});
+
+// Check whether the given user already has a tab saved under this exact title.
+async function isTitleTaken(userId,title,excludeId){
+  let q=sbClient.from('tabs').select('id').eq('user_id',userId).eq('title',title);
+  if(excludeId)q=q.neq('id',excludeId);
+  const{data,error}=await q;
+  if(error)return false; // fail-open: don't block saving just because the check itself failed
+  return data&&data.length>0;
+}
+// Find a title that isn't taken yet, appending "(2)", "(3)", ... as needed.
+async function uniqueTitle(userId,baseTitle){
+  let candidate=baseTitle,n=2;
+  while(await isTitleTaken(userId,candidate)){candidate=`${baseTitle}(${n})`;n++;}
+  return candidate;
+}
 
 async function cloudSave(){
   const{data:{session}}=await sbClient.auth.getSession();
   if(!session){cloudMsg('ログインしてください',true);return;}
   const titleInp=document.getElementById('saveTitleInp');
   const title=titleInp.value.trim()||'無題のタブ譜';
+  if(await isTitleTaken(session.user.id,title)){
+    cloudMsg('同じ名前の保存データがすでにあります。別の名前にしてください',true);
+    return;
+  }
   const code=expData();
   const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title,code});
   if(error){cloudMsg('保存に失敗しました',true);return;}
@@ -598,9 +655,19 @@ async function loadMyTabs(){
     openB.addEventListener('click',()=>{
       try{impData(row.code);showMsg('読み込みました',false);}catch(e){cloudMsg('読み込みに失敗しました（データが壊れている可能性があります）',true);}
     });
+    const overB=document.createElement('button');overB.className='btn sm';overB.textContent='上書き保存';
+    overB.title='今開いているタブ譜の内容で、このタブ譜を上書きします';
+    overB.addEventListener('click',async()=>{
+      if(!confirm(`「${row.title}」を、今開いている内容で上書き保存します。よろしいですか？`))return;
+      const code=expData();
+      const{error}=await sbClient.from('tabs').update({code,updated_at:new Date().toISOString()}).eq('id',row.id);
+      if(error)cloudMsg('上書き保存に失敗しました',true);else{cloudMsg('上書き保存しました',false);loadMyTabs();}
+    });
     const dupB=document.createElement('button');dupB.className='btn sm';dupB.textContent='複製';
     dupB.addEventListener('click',async()=>{
-      const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title:row.title+' のコピー',code:row.code});
+      const baseTitle=row.title+' のコピー';
+      const finalTitle=await uniqueTitle(session.user.id,baseTitle);
+      const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title:finalTitle,code:row.code});
       if(error)cloudMsg('複製に失敗しました',true);else{cloudMsg('複製しました',false);loadMyTabs();}
     });
     const copyB=document.createElement('button');copyB.className='btn sm';copyB.textContent='コードをコピー';
@@ -613,7 +680,7 @@ async function loadMyTabs(){
       const{error}=await sbClient.from('tabs').delete().eq('id',row.id);
       if(error)cloudMsg('削除に失敗しました',true);else{cloudMsg('削除しました',false);loadMyTabs();}
     });
-    acts.appendChild(openB);acts.appendChild(dupB);acts.appendChild(copyB);acts.appendChild(delB);
+    acts.appendChild(openB);acts.appendChild(overB);acts.appendChild(dupB);acts.appendChild(copyB);acts.appendChild(delB);
     r.appendChild(t);r.appendChild(d);r.appendChild(acts);
     listEl.appendChild(r);
   });
@@ -1064,7 +1131,7 @@ let nextStepTime=0;
 
 function resumeFrom(pos){
   ppos=pos;initAudio();actx.resume().then(()=>{
-    playing=true;ptempo=tempo;pst=performance.now();psp=ppos;
+    playing=true;ptempo=effTempo();pst=performance.now();psp=ppos;
     document.getElementById('playBtn').textContent='⏸ 一時停止';
     document.getElementById('sdot').classList.add('playing');
     document.getElementById('statusTxt').textContent='再生中...';
@@ -1083,10 +1150,10 @@ function scheduler(){
     setTimeout(()=>{
       if(!playing)return; // stale callback from before a pause/stop — ignore
       hlStep(playingStep);
-      pst=performance.now();psp=playingStep;ptempo=tempo;
+      pst=performance.now();psp=playingStep;ptempo=effTempo();
       updatePbar();
     },delayMs);
-    const stepDurSec=(60/tempo)*0.25; // 16th-note duration at the tempo in effect when this step is scheduled
+    const stepDurSec=(60/effTempo())*0.25; // 16th-note duration, scaled by tempo AND playback speed
     nextStepTime+=stepDurSec;
     let next=playingStep+1;
     if(loopOn){
@@ -1341,7 +1408,7 @@ function playStep(step,startTime){
   for(let si=0;si<strs.length;si++){
     const note=notes[nk(si,step)];if(!note)continue;
     if(note.ghost){playGhost(strs[Math.min(note.si??si,strs.length-1)].m,startTime);continue;}
-    const dur=durSec(note,tempo);
+    const dur=durSec(note,effTempo());
     if(note.slide)playSlide(strs,si,note,dur,startTime);
     else playBass(m2f(strs[si].m+note.fret),dur,note.vib,startTime);
   }
