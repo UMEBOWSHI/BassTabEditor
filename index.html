@@ -220,6 +220,18 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   <span class="val"><span id="volV">50</span></span>
   <button class="btn" id="clearBtn">🗑 クリア</button>
 </div>
+<div class="row">
+  <span class="lbl">メトロノーム</span>
+  <button class="btn sm" id="metroToggle">OFF</button>
+  <select id="metroDurSel"></select>
+</div>
+<div class="row">
+  <span class="lbl">メトロノーム音量</span>
+  <button class="btn" id="mvm">−</button>
+  <input type="range" id="metroVolSl" min="0" max="100" value="60">
+  <button class="btn" id="mvp">＋</button>
+  <span class="val"><span id="metroVolV">60</span></span>
+</div>
 <!-- Transport -->
 <div class="transport-bar">
   <div class="transport-row">
@@ -296,6 +308,7 @@ function getCW(){return svgBPL===4?10:20}
 let playing=false,ptimer=null,ppos=0;
 let afId=null,pst=0,psp=0,ptempo=80;
 let tSig=4,tempo=80,nStr=4,bars=1,vol=1,playbackSpeed=1;
+let metroOn=false,metroDur=4,metroVol=0.6; // metroDur uses the same scale as DURS (steps per click)
 // Effective tempo used for all audio scheduling/timing math. Playback speed
 // is independent of the displayed BPM: it scales timing only. Since pitch
 // (frequency) is set directly via m2f() rather than derived from duration,
@@ -385,7 +398,7 @@ function slSetDuration(slide,idx,value,totalSteps){
 }
 
 // ── Audio init ─────────────────────────────────────────────────────
-let actx=null,mgain=null,limiter=null;
+let actx=null,mgain=null,limiter=null,metroGain=null;
 function initAudio(){
   if(!actx||actx.state==='closed'){
     actx=new(window.AudioContext||window.webkitAudioContext)();
@@ -399,6 +412,10 @@ function initAudio(){
     limiter.attack.setValueAtTime(0.003,actx.currentTime);
     limiter.release.setValueAtTime(0.1,actx.currentTime);
     mgain.connect(limiter);
+    // Metronome has its own gain (independent volume from note playback),
+    // but shares the same limiter so it can't cause clipping either.
+    metroGain=actx.createGain();metroGain.gain.value=metroVol;
+    metroGain.connect(limiter);
     limiter.connect(actx.destination);
   }
   return actx;
@@ -482,6 +499,21 @@ function playSlide(strs,si,note,totalDurSec,startTime){
   makeBassSeamless(ctx,t0,totalDurSec,sched,!!note.vib);
 }
 
+// Metronome click: short percussive blip. Strong (bar downbeat) is higher-pitched
+// and louder; weak (other beats) is lower and quieter. Routed through its own
+// gain node (metroGain) so volume is independent from note playback volume.
+function playClick(strong,startTime){
+  const ctx=initAudio();const t=startTime??ctx.currentTime;
+  const f=strong?1600:1000;
+  const osc=ctx.createOscillator();osc.type='sine';osc.frequency.value=f;
+  const g=ctx.createGain();
+  const peak=strong?1.0:0.55;
+  g.gain.setValueAtTime(peak,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.045);
+  osc.connect(g);g.connect(metroGain);
+  osc.start(t);osc.stop(t+0.05);
+}
+
 function playGhost(om,startTime){
   const ctx=initAudio();const mg=getM();const t=startTime??ctx.currentTime;
   const f=m2f(om||28),tf=Math.min(f*.8,120);
@@ -523,6 +555,27 @@ document.getElementById('vp').addEventListener('click',()=>setVol(Math.round(vol
 document.getElementById('barsToggle').addEventListener('click',function(){svgBPL=svgBPL===4?2:4;this.textContent=svgBPL===4?'2小節表示':'4小節表示';renderSvg();});
 document.getElementById('scrollToggle').addEventListener('click',function(){autoSc=!autoSc;this.textContent=autoSc?'自動スクロール ON':'自動スクロール OFF';this.classList.toggle('active',autoSc);});
 
+// ── Metronome ──────────────────────────────────────────────────────
+(function initMetroUI(){
+  const sel=document.getElementById('metroDurSel');
+  DURS.forEach(d=>{const o=document.createElement('option');o.value=String(d.v);o.textContent=d.l;if(d.v===metroDur)o.selected=true;sel.appendChild(o);});
+})();
+document.getElementById('metroToggle').addEventListener('click',function(){
+  metroOn=!metroOn;
+  this.textContent=metroOn?'ON':'OFF';
+  this.classList.toggle('on-loop',metroOn);
+});
+document.getElementById('metroDurSel').addEventListener('change',function(){metroDur=Number(this.value)||4;});
+function setMetroVol(v){
+  metroVol=Math.max(0,Math.min(100,v))/100;
+  document.getElementById('metroVolSl').value=Math.round(metroVol*100);
+  document.getElementById('metroVolV').textContent=Math.round(metroVol*100);
+  if(metroGain)metroGain.gain.value=metroVol;
+}
+document.getElementById('metroVolSl').addEventListener('input',function(){setMetroVol(parseInt(this.value))});
+document.getElementById('mvm').addEventListener('click',()=>setMetroVol(Math.round(metroVol*100)-1));
+document.getElementById('mvp').addEventListener('click',()=>setMetroVol(Math.round(metroVol*100)+1));
+
 // ── Note utility ───────────────────────────────────────────────────
 function nOwner(si,step){for(let s=Math.max(0,step-32);s<=step;s++){const n=notes[nk(si,s)];if(n&&s+Math.ceil(dispS(n))>step)return s;}return null;}
 
@@ -540,14 +593,15 @@ function unpackNote(o){
 }
 function expData(){
   const ns={};Object.entries(notes).forEach(([k,v])=>ns[k]=packNote(v));
-  return btoa(unescape(encodeURIComponent(JSON.stringify({v:13,ts:tSig,tp:tempo,ns:nStr,b:bars,vl:Math.round(vol*50),n:ns}))));
+  // Volume is a local playback preference, not part of the tab itself — not saved.
+  return btoa(unescape(encodeURIComponent(JSON.stringify({v:13,ts:tSig,tp:tempo,ns:nStr,b:bars,n:ns}))));
 }
 function impData(code){
   const j=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
   if(!j||!j.v)throw new Error('invalid');
   tSig=j.ts||4;tempo=j.tp||80;nStr=j.ns||4;bars=j.b||1;
   document.getElementById('timeSig').value=tSig;document.getElementById('stringSel').value=nStr;
-  setTempo(tempo);if(j.vl!=null)setVol(j.vl);
+  setTempo(tempo); // j.vl (volume) from older saved codes is intentionally ignored — current volume stays as-is
   notes={};if(j.n)Object.entries(j.n).forEach(([k,v])=>notes[k]=unpackNote(v));
   stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
 }
@@ -1148,6 +1202,9 @@ function scheduler(){
     const playingStep=ppos;
     const fireAt=nextStepTime;
     playStep(playingStep,fireAt);
+    if(metroOn&&playingStep%metroDur===0){
+      playClick(playingStep%SPB===0,fireAt); // strong on bar downbeat, weak otherwise
+    }
     const delayMs=Math.max(0,(fireAt-actx.currentTime)*1000);
     setTimeout(()=>{
       if(!playing)return; // stale callback from before a pause/stop — ignore
