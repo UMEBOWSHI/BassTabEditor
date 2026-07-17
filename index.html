@@ -79,7 +79,8 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .dot-fade{position:absolute;top:0;right:0;bottom:0;background:rgba(255,255,255,.25);z-index:1}
 .stac-ghost{position:absolute;top:0;bottom:0;right:0;border:1.5px dashed rgba(255,255,255,.4);border-left:none;z-index:1}
 .vib-lbl{position:absolute;bottom:1px;left:50%;transform:translateX(-50%);font-size:8px;color:rgba(255,255,255,.75);z-index:3;pointer-events:none}
-.rh{position:absolute;top:3px;bottom:3px;width:9px;display:none;align-items:center;justify-content:center;font-size:7px;color:#fff;cursor:pointer;z-index:20;user-select:none;background:rgba(0,0,0,.4);border-radius:2px}
+.rh{position:absolute;top:2px;bottom:2px;width:15px;display:none;align-items:center;justify-content:center;font-size:10px;color:#fff;cursor:pointer;z-index:20;user-select:none;background:rgba(0,0,0,.45);border-radius:3px}
+.rh.narrow{width:9px;font-size:7px}
 .note-block:hover .rh{display:flex}
 .rh-l{left:1px}.rh-r{right:1px}
 .rh:hover{background:rgba(0,0,0,.7)}
@@ -823,8 +824,12 @@ function openPop(si,step,mx,my){
   inner.appendChild(pLeft);inner.appendChild(pRight);pop.appendChild(inner);
 
   let isDot=!!(ex?.dot),isStac=!!(ex?.stac);
-  let isTrip=!!(ex?.trip);
-  let fineMode=!!(ex?.fine)||isTrip; // triplet notes are always fine
+  // fineMode is derived from whether the note currently *requires* fine mode
+  // (triplet length, non-multiple-of-3 length, or off-grid start position),
+  // rather than a stored flag — so a note whose length is now coarse-compatible
+  // opens with the toggle OFF and switchable. Set properly by refreshFineUI().
+  let isTrip=false;
+  let fineMode=false;
   let tech=ex?(ex.ghost?'ghost':ex.slide?'slide':ex.vib?'vib':'none'):'none';
   // Working copy of slide state (deep copy)
   let slideState=ex?.slide?{targets:ex.slide.targets.slice(),durations:ex.slide.durations.slice()}:null;
@@ -866,7 +871,10 @@ function openPop(si,step,mx,my){
   const TRIP_MAP={6:2,12:4,24:8,48:16};
   // Whether the current length can be represented on the 16-division grid
   // (a multiple of TPS=3 steps) and is not itself a triplet length.
-  function canBeCoarse(){const d=getCurDurVal();return d%TPS===0&&!isTripDur(d);}
+  // OFF (coarse) is allowed only when the note fits the 16-division grid in all
+  // three senses: its length is a triplet length? no; length is a multiple of
+  // TPS(=3)? yes; AND its start position sits on a 16-division boundary (step%3===0).
+  function canBeCoarse(){const d=getCurDurVal();return d%TPS===0&&!isTripDur(d)&&(step%TPS===0);}
   function refreshFineUI(){
     // Fine is forced ON whenever the current length can't live on the 16-division
     // grid (triplet lengths, or any non-multiple-of-3). Otherwise the user is free
@@ -1113,8 +1121,9 @@ function openPop(si,step,mx,my){
 
   function buildN(){
     const d=getCurDurVal();
-    const fine=fineMode||isTrip||isTripDur(d);
-    const trip=isTrip||isTripDur(d);
+    // trip = has a triplet length; fine = user toggle ON, or the note can't be coarse
+    const trip=isTripDur(d);
+    const fine=fineMode||!canBeCoarse();
     if(tech==='ghost')return{fret:null,d,ghost:true,dot:false,stac:isStac,vib:false,si,slide:null,fine,trip};
     const fret=parseInt(fI.value);
     if(tech==='slide'&&slideState){
@@ -1206,12 +1215,13 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();});
 function ensureB(n){while(bars*SPB<n)bars++;}
 function resizeN(si,step,delta){
   const note=notes[nk(si,step)];if(!note)return;
-  // Granularity and minimum depend on the mode:
+  // A note is in fine mode if it was flagged fine, or its length/position can't
+  // live on the 16-division grid (triplet length, non-mult-of-3, or off-grid start).
+  const needsFine=note.fine||isTripDur(note.d)||(note.d%TPS!==0)||(step%TPS!==0);
   //  - coarse: move by a 16th note (TPS=3 steps), minimum length = 16th (3)
-  //  - fine (or triplet note): move by 1 step, minimum length = half-beat triplet (2)
-  const fineOn=(note.fine||note.trip);
-  const gran=fineOn?1:TPS;
-  const minLen=fineOn?2:TPS;
+  //  - fine:   move by 1 step, minimum length = half-beat triplet (2)
+  const gran=needsFine?1:TPS;
+  const minLen=needsFine?2:TPS;
   const nd=Math.max(minLen,note.d+delta*gran);
   const en=note.dot?nd*1.5:nd;
   for(let s=step+1;s<step+Math.ceil(en);s++){const o=nOwner(si,s);if(o!==null&&o!==step)return;}
@@ -1539,8 +1549,9 @@ function buildCanvas(){
           inn.appendChild(ff);
         }
         blk.appendChild(inn);
-        if(ds>TPS){const rl=document.createElement('div');rl.className='rh rh-l';rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
-        const rr=document.createElement('div');rr.className='rh rh-r';rr.textContent='▶';rr.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,+1);});blk.appendChild(rr);
+        const narrowCls=(note.d<=2)?' narrow':'';
+        if(ds>TPS){const rl=document.createElement('div');rl.className='rh rh-l'+narrowCls;rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
+        const rr=document.createElement('div');rr.className='rh rh-r'+narrowCls;rr.textContent='▶';rr.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,+1);});blk.appendChild(rr);
         blk.addEventListener('click',e=>{if(e.target.classList.contains('rh'))return;e.stopPropagation();openPop(si,step,e.clientX,e.clientY);});
         sr.appendChild(blk);
       }
