@@ -64,6 +64,8 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .note-block.playing{background:var(--amber)}
 .note-block.ghost{background:transparent;border:1.5px dashed var(--blue)}
 .note-block.ghost.playing{border-color:var(--amber)}
+.note-block.trip{background:var(--purple)}
+.note-block.trip.ghost{background:transparent;border-color:var(--purple)}
 .note-inner{position:absolute;top:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:0 3px;z-index:3}
 .note-fret{font-size:11px;font-weight:700;color:#fff;font-family:monospace;line-height:1;white-space:nowrap}
 .ghost .note-fret{color:var(--blue);font-size:13px}
@@ -293,13 +295,26 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 
 <script>
 // ── Constants ──────────────────────────────────────────────────────
-const SPB=16,SW=44,DDUR=4;
+// ── Time resolution ────────────────────────────────────────────────
+// Internal resolution is 48 divisions per 4/4 bar (TPQ=12, i.e. a quarter
+// note = 12 steps). This lets triplets sit on integer steps: an 8th-note
+// triplet note = 4 steps, a 16th-note triplet note = 2 steps.
+// The VISIBLE grid still shows 16 slots per bar (unchanged look); each
+// visible slot spans TPS=3 internal steps. Notes are positioned by step/TPS.
+const SPB=48;      // internal steps per bar
+const VIS=16;      // visible grid slots per bar
+const TPS=3;       // internal steps per visible slot (SPB/VIS)
+const SW=44;       // px width per visible slot
+const DDUR=12;     // default note length = quarter note (12 steps)
 const STRS={
   4:[{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28}],
   5:[{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28},{n:'B',m:23}],
   6:[{n:'C',m:48},{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28},{n:'B',m:23}]
 };
-const DURS=[{l:'十六分音符(1)',v:1},{l:'八分音符(2)',v:2},{l:'四分音符(4)',v:4},{l:'二分音符(8)',v:8},{l:'全音符(16)',v:16}];
+// Durations in 48-division steps
+const DURS=[{l:'十六分音符',v:3},{l:'八分音符',v:6},{l:'四分音符',v:12},{l:'二分音符',v:24},{l:'全音符',v:48},{l:'八分三連符',v:4},{l:'十六分三連符',v:2}];
+// Standard (non-triplet) lengths, used to decide when to show a "(n)" suffix
+const STD_DURS=[3,6,12,24,48];
 
 const SVG_LP=30,SVG_TP=22,SVG_SG=24,SVG_RP=12;
 let svgBPL=4,autoSc=true;
@@ -308,7 +323,7 @@ function getCW(){return svgBPL===4?10:20}
 let playing=false,ptimer=null,ppos=0;
 let afId=null,pst=0,psp=0,ptempo=80;
 let tSig=4,tempo=80,nStr=4,bars=1,vol=1,playbackSpeed=1;
-let metroOn=false,metroDur=4,metroVol=0.6; // metroDur uses the same scale as DURS (steps per click)
+let metroOn=false,metroDur=12,metroVol=0.6; // metroDur in 48-division steps (12 = quarter note)
 // Effective tempo used for all audio scheduling/timing math. Playback speed
 // is independent of the displayed BPM: it scales timing only. Since pitch
 // (frequency) is set directly via m2f() rather than derived from duration,
@@ -321,11 +336,13 @@ function gStr(){return STRS[nStr]}
 function tSteps(){return bars*SPB}
 function nk(si,s){return si+':'+s}
 function m2f(m){return 440*Math.pow(2,(m-69)/12)}
-function dispS(n){return n.dot?n.d*1.5:n.d}
-function durSec(n,t){let s=n.d;if(n.dot)s*=1.5;if(n.stac)s*=0.5;return(60/t)*(s/4)}
-function hss(){return(60/tempo)*0.125} // 32nd note sec
-// Total 32nd-note slots available for a note's slide (matches dispS but in 32nds)
-function gmxFor(note){const eff=note.dot?note.d*1.5:note.stac?note.d*0.5:note.d;return Math.max(1,Math.floor(eff*2));}
+function dispS(n){return n.dot?n.d*1.5:n.d}          // effective length in 48-division steps
+function durSec(n,t){let s=n.d;if(n.dot)s*=1.5;if(n.stac)s*=0.5;return(60/t)*(s/12)}  // 12 steps = 1 quarter = 1 beat
+function hss(){return(60/tempo)*(1/12)} // one 48-division step in sec (unused legacy)
+// Total slide sub-steps available for a note = its length in 48-division steps.
+function gmxFor(note){const eff=note.dot?note.d*1.5:note.stac?note.d*0.5:note.d;return Math.max(1,Math.floor(eff));}
+// Visible-slot X position (in px) for an internal step within a bar
+function stepX(sInBar){return (sInBar/TPS)*SW;}
 
 // ── Slide core (pure functions) ──────────────────────────────────
 // INVARIANT: durations.length===2*targets.length+1; sum(durations)===total;
@@ -565,7 +582,7 @@ document.getElementById('metroToggle').addEventListener('click',function(){
   this.textContent=metroOn?'ON':'OFF';
   this.classList.toggle('on-loop',metroOn);
 });
-document.getElementById('metroDurSel').addEventListener('change',function(){metroDur=Number(this.value)||4;});
+document.getElementById('metroDurSel').addEventListener('change',function(){metroDur=Number(this.value)||12;});
 function setMetroVol(v){
   metroVol=Math.max(0,Math.min(100,v))/100;
   document.getElementById('metroVolSl').value=Math.round(metroVol*100);
@@ -577,32 +594,56 @@ document.getElementById('mvm').addEventListener('click',()=>setMetroVol(Math.rou
 document.getElementById('mvp').addEventListener('click',()=>setMetroVol(Math.round(metroVol*100)+1));
 
 // ── Note utility ───────────────────────────────────────────────────
-function nOwner(si,step){for(let s=Math.max(0,step-32);s<=step;s++){const n=notes[nk(si,s)];if(n&&s+Math.ceil(dispS(n))>step)return s;}return null;}
+function nOwner(si,step){for(let s=Math.max(0,step-72);s<=step;s++){const n=notes[nk(si,s)];if(n&&s+Math.ceil(dispS(n))>step)return s;}return null;}
 
 // ── Export/Import ──────────────────────────────────────────────────
 function packNote(n){
   const o={};
   if(n.fret!=null)o.f=n.fret;o.d=n.d;
   if(n.ghost)o.g=1;if(n.dot)o.do=1;if(n.stac)o.st=1;if(n.vib)o.v=1;o.si=n.si;
+  if(n.fine)o.fn=1;if(n.trip)o.tr=1;
   if(n.slide)o.sl={t:n.slide.targets,d:n.slide.durations};
   return o;
 }
 function unpackNote(o){
-  return{fret:o.f??null,d:o.d||4,ghost:!!o.g,dot:!!o.do,stac:!!o.st,vib:!!o.v,si:o.si||0,
+  return{fret:o.f??null,d:o.d||DDUR,ghost:!!o.g,dot:!!o.do,stac:!!o.st,vib:!!o.v,si:o.si||0,
+    fine:!!o.fn,trip:!!o.tr,
     slide:o.sl?{targets:o.sl.t,durations:o.sl.d}:null};
 }
 function expData(){
   const ns={};Object.entries(notes).forEach(([k,v])=>ns[k]=packNote(v));
-  // Volume is a local playback preference, not part of the tab itself — not saved.
-  return btoa(unescape(encodeURIComponent(JSON.stringify({v:13,ts:tSig,tp:tempo,ns:nStr,b:bars,n:ns}))));
+  // v14: internal resolution is 48 divisions/bar. Volume is a local preference — not saved.
+  return btoa(unescape(encodeURIComponent(JSON.stringify({v:14,ts:tSig,tp:tempo,ns:nStr,b:bars,n:ns}))));
 }
 function impData(code){
   const j=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
   if(!j||!j.v)throw new Error('invalid');
   tSig=j.ts||4;tempo=j.tp||80;nStr=j.ns||4;bars=j.b||1;
   document.getElementById('timeSig').value=tSig;document.getElementById('stringSel').value=nStr;
-  setTempo(tempo); // j.vl (volume) from older saved codes is intentionally ignored — current volume stays as-is
-  notes={};if(j.n)Object.entries(j.n).forEach(([k,v])=>notes[k]=unpackNote(v));
+  setTempo(tempo); // j.vl (volume) from older saved codes is intentionally ignored
+  // Migration: data at v<=13 used 16 divisions/bar. Scale step positions and
+  // durations by TPS(=3) to convert into the 48-division system used from v14.
+  const legacy=(j.v<=13);
+  notes={};
+  if(j.n)Object.entries(j.n).forEach(([k,v])=>{
+    const note=unpackNote(v);
+    let key=k;
+    if(legacy){
+      // Positions and note durations scale by TPS (16-grid -> 48-grid).
+      note.d=note.d*TPS;
+      const [si,st]=k.split(':');
+      key=si+':'+(parseInt(st)*TPS);
+      // Slide sub-step durations used a different old unit (32nds), so scaling
+      // by TPS would overshoot. Re-normalize to the note's new total instead;
+      // this keeps the slide valid (invariant holds) with proportions preserved
+      // as closely as integer steps allow.
+      if(note.slide){
+        const norm=slNormalize({targets:note.slide.targets,durations:note.slide.durations},gmxFor(note));
+        note.slide={targets:norm.targets,durations:norm.durations};
+      }
+    }
+    notes[key]=note;
+  });
   stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
 }
 document.getElementById('exportBtn').addEventListener('click',()=>{document.getElementById('ioTa').value=expData();showMsg('エクスポートしました',false);});
@@ -768,6 +809,8 @@ function openPop(si,step,mx,my){
   inner.appendChild(pLeft);inner.appendChild(pRight);pop.appendChild(inner);
 
   let isDot=!!(ex?.dot),isStac=!!(ex?.stac);
+  let isTrip=!!(ex?.trip);
+  let fineMode=!!(ex?.fine)||isTrip; // triplet notes are always fine
   let tech=ex?(ex.ghost?'ghost':ex.slide?'slide':ex.vib?'vib':'none'):'none';
   // Working copy of slide state (deep copy)
   let slideState=ex?.slide?{targets:ex.slide.targets.slice(),durations:ex.slide.durations.slice()}:null;
@@ -792,13 +835,44 @@ function openPop(si,step,mx,my){
   dF.appendChild(dLbl);dF.appendChild(dS);
   // Custom duration number input (shown only when "custom" selected)
   const dCustomWrap=document.createElement('div');dCustomWrap.style.cssText='margin-top:5px;display:'+(!isStdDur?'block':'none');
-  const dCustomLbl=document.createElement('label');dCustomLbl.style.cssText='font-size:10px;color:var(--text3);display:block;margin-bottom:2px';dCustomLbl.textContent='長さ（16分音符いくつ分）';
+  const dCustomLbl=document.createElement('label');dCustomLbl.style.cssText='font-size:10px;color:var(--text3);display:block;margin-bottom:2px';dCustomLbl.textContent='長さ（48分割ステップ数 / 4分音符=12）';
   const dCustomInp=document.createElement('input');dCustomInp.type='number';dCustomInp.min=1;dCustomInp.style.cssText='width:70px;font-size:13px;padding:3px 6px;';
   dCustomInp.value=String(curDurVal);
   dCustomInp.addEventListener('wheel',e=>e.preventDefault(),{passive:false});
   dCustomWrap.appendChild(dCustomLbl);dCustomWrap.appendChild(dCustomInp);
   dF.appendChild(dCustomWrap);
+  // Fine-mode toggle + triplet-ize button
+  const fineRow=document.createElement('div');fineRow.style.cssText='margin-top:7px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+  const fineBtn=document.createElement('button');fineBtn.className='btn sm';fineBtn.type='button';
+  const tripBtn=document.createElement('button');tripBtn.className='btn sm';tripBtn.type='button';tripBtn.textContent='3連符化';
+  fineRow.appendChild(fineBtn);fineRow.appendChild(tripBtn);
+  dF.appendChild(fineRow);
   pLeft.appendChild(dF);
+
+  function refreshFineUI(){
+    fineBtn.textContent=fineMode?'細かい長さ設定: ON':'細かい長さ設定: OFF';
+    fineBtn.classList.toggle('on-loop',fineMode);
+    // Triplet-ize only makes sense on a plain quarter note (12 steps) that isn't already a triplet
+    const canTrip=(getCurDurVal()===12&&!isTrip);
+    tripBtn.disabled=!canTrip;tripBtn.style.opacity=canTrip?'1':'.4';
+    if(isTrip){fineBtn.disabled=true;fineBtn.style.opacity='.5';fineBtn.title='3連符は常に細かい設定です';}
+    else{fineBtn.disabled=false;fineBtn.style.opacity='1';fineBtn.title='';}
+  }
+  fineBtn.addEventListener('click',()=>{if(isTrip)return;fineMode=!fineMode;refreshFineUI();});
+  // "3連符化": split this quarter-note (12 steps) into three 8th-triplet notes (4 steps each),
+  // all inheriting the current fret & articulation. Slide is cleared on the split notes.
+  tripBtn.addEventListener('click',()=>{
+    if(getCurDurVal()!==12||isTrip)return;
+    const fret=parseInt(fI.value);const f=isNaN(fret)?0:fret;
+    // Ensure the three target steps (step, step+4, step+8) are free (besides this note)
+    for(let k=1;k<3;k++){const o=nOwner(si,step+k*4);if(o!==null&&o!==step){alert('3連符化するスペースがありません');return;}}
+    for(let k=0;k<3;k++){
+      notes[nk(si,step+k*4)]={fret:f,d:4,ghost:tech==='ghost',dot:false,stac:isStac,vib:tech==='vib',si,slide:null,fine:true,trip:true};
+    }
+    ensureB(step+12);
+    closePop();buildCanvas();renderSvg();
+  });
+
 
   // Unified getter for the current duration value (number, always >=1)
   function getCurDurVal(){
@@ -816,15 +890,18 @@ function openPop(si,step,mx,my){
       dS.value=String(match.v);
       dCustomWrap.style.display='none';
     }
+    refreshFineUI();
     renderSlideUI();
   }
   dS.addEventListener('change',()=>{
     dCustomWrap.style.display=(dS.value==='custom')?'block':'none';
     if(dS.value==='custom')dCustomInp.focus();
+    refreshFineUI();
     renderSlideUI();
   });
   dCustomInp.addEventListener('change',syncCustomToStandard);
   dCustomInp.addEventListener('blur',syncCustomToStandard);
+  refreshFineUI();
 
   const aS=document.createElement('div');aS.className='mod-sec';
   const aL=document.createElement('div');aL.className='mod-sec-lbl';aL.textContent='アーティキュレーション';
@@ -1011,16 +1088,15 @@ function openPop(si,step,mx,my){
 
   function buildN(){
     const d=getCurDurVal();
-    if(tech==='ghost')return{fret:null,d,ghost:true,dot:false,stac:isStac,vib:false,si,slide:null};
+    const fine=fineMode||isTrip;
+    const trip=isTrip;
+    if(tech==='ghost')return{fret:null,d,ghost:true,dot:false,stac:isStac,vib:false,si,slide:null,fine,trip};
     const fret=parseInt(fI.value);
     if(tech==='slide'&&slideState){
       const validTargets=slideState.targets.filter(t=>t!=null);
       if(validTargets.length===0){
-        return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,slide:null};
+        return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,slide:null,fine,trip};
       }
-      // Build final slide with only valid (non-null) targets; durations already match length
-      // If some targets are null (incomplete), we exclude them along with their slide-seg+next-hold,
-      // merging removed steps into preceding hold — same logic as slRemoveTarget, applied from the end.
       let workTargets=slideState.targets.slice();
       let workDurs=slideState.durations.slice();
       for(let i=workTargets.length-1;i>=0;i--){
@@ -1033,18 +1109,19 @@ function openPop(si,step,mx,my){
         }
       }
       if(workTargets.length===0){
-        return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,slide:null};
+        return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,slide:null,fine,trip};
       }
       return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:false,si,
-        slide:{targets:workTargets,durations:workDurs}};
+        slide:{targets:workTargets,durations:workDurs},fine,trip};
     }
-    return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:tech==='vib',si,slide:null};
+    return{fret:isNaN(fret)?0:fret,d,ghost:false,dot:isDot,stac:isStac,vib:tech==='vib',si,slide:null,fine,trip};
   }
 
   cpB.addEventListener('click',e=>{e.stopPropagation();clip={...buildN()};ptB.disabled=false;ptB.style.opacity='1';cpB.style.color='var(--green)';setTimeout(()=>cpB.style.color='',800);});
   ptB.addEventListener('click',e=>{
     e.stopPropagation();if(!clip)return;const cb2=clip;
     isDot=!!cb2.dot;isStac=!!cb2.stac;
+    isTrip=!!cb2.trip;fineMode=!!cb2.fine||isTrip;
     tech=cb2.ghost?'ghost':cb2.slide?'slide':cb2.vib?'vib':'none';
     fI.value=cb2.ghost?'':(cb2.fret!=null?String(cb2.fret):'');
     const pastedD=cb2.d||DDUR;
@@ -1052,7 +1129,7 @@ function openPop(si,step,mx,my){
     if(pastedIsStd){dS.value=String(pastedD);dCustomWrap.style.display='none';}
     else{dS.value='custom';dCustomInp.value=String(pastedD);dCustomWrap.style.display='block';}
     slideState=cb2.slide?{targets:cb2.slide.targets.slice(),durations:cb2.slide.durations.slice()}:null;
-    refAll();
+    refAll();refreshFineUI();
   });
 
   const acts=document.createElement('div');acts.className='pop-acts';pop.appendChild(acts);
@@ -1104,7 +1181,10 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();});
 function ensureB(n){while(bars*SPB<n)bars++;}
 function resizeN(si,step,delta){
   const note=notes[nk(si,step)];if(!note)return;
-  const nd=Math.max(1,note.d+delta);
+  // Coarse mode moves by a whole visible slot (TPS steps = a 16th note);
+  // fine mode (or triplet notes) moves by a single 48-division step.
+  const gran=(note.fine||note.trip)?1:TPS;
+  const nd=Math.max(1,note.d+delta*gran);
   const en=note.dot?nd*1.5:nd;
   for(let s=step+1;s<step+Math.ceil(en);s++){const o=nOwner(si,s);if(o!==null&&o!==step)return;}
   note.d=nd;
@@ -1322,10 +1402,10 @@ document.getElementById('stringSel').addEventListener('change',function(){
 // ── Playhead anim ─────────────────────────────────────────────────
 function animPH(){
   if(!playing){cancelAnimationFrame(afId);return;}
-  const el=(performance.now()-pst)/1000,sd=(60/ptempo)*.25,pos=(psp+el/sd);
+  const el=(performance.now()-pst)/1000,sd=(60/ptempo)*(1/12),pos=(psp+el/sd); // sd = one 48-division step in sec
   const ts=tSteps();const safePos=((pos%ts)+ts)%ts;
-  const CW=getCW(),cpl=svgBPL*SPB,NS=gStr().length;
-  const li=Math.floor(safePos/cpl),ci=safePos%cpl,cx=SVG_LP+ci*CW,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
+  const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,NS=gStr().length;
+  const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=SVG_LP+ci*SX,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
   const svg=document.getElementById('tabSvg');
   if(svg){
     let ln=svg.querySelector('.svgph');
@@ -1336,15 +1416,15 @@ function animPH(){
   afId=requestAnimationFrame(animPH);
 }
 function hidePH(){cancelAnimationFrame(afId);const s=document.getElementById('tabSvg');if(s){const l=s.querySelector('.svgph');if(l)l.setAttribute('opacity','0');}}
-function updGP(step){for(let b=0;b<bars;b++){const ph=document.getElementById('ph-b-'+b);if(!ph)continue;const bs=b*SPB;if(step>=0&&step>=bs&&step<bs+SPB){ph.style.left=((step-bs)*SW+SW/2-1)+'px';ph.classList.add('visible');}else ph.classList.remove('visible');}}
+function updGP(step){for(let b=0;b<bars;b++){const ph=document.getElementById('ph-b-'+b);if(!ph)continue;const bs=b*SPB;if(step>=0&&step>=bs&&step<bs+SPB){ph.style.left=(stepX(step-bs)+SW/(2*TPS)-1)+'px';ph.classList.add('visible');}else ph.classList.remove('visible');}}
 // Statically position the SVG preview playhead line at a given step (used when not actively playing,
 // e.g. after skip/rewind/scrub while paused). Does not animate — animPH() handles smooth motion during playback.
 function updateSvgPH(step){
   const svg=document.getElementById('tabSvg');if(!svg)return;
   if(step<0){const l=svg.querySelector('.svgph');if(l)l.setAttribute('opacity','0');return;}
-  const CW=getCW(),cpl=svgBPL*SPB,NS=gStr().length;
+  const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,NS=gStr().length;
   const ts=tSteps();const safePos=((step%ts)+ts)%ts;
-  const li=Math.floor(safePos/cpl),ci=safePos%cpl,cx=SVG_LP+ci*CW,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
+  const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=SVG_LP+ci*SX,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
   let ln=svg.querySelector('.svgph');
   if(!ln){ln=document.createElementNS('http://www.w3.org/2000/svg','line');ln.classList.add('svgph');ln.setAttribute('stroke','#2a7fd4');ln.setAttribute('stroke-width','1.5');svg.appendChild(ln);}
   ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+SVG_SG-12);ln.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);ln.setAttribute('opacity','1');
@@ -1355,7 +1435,7 @@ function updateSvgPH(step){
 // ── Canvas ─────────────────────────────────────────────────────────
 function buildCanvas(){
   const cv=document.getElementById('tabCanvas');cv.innerHTML='';
-  const strs=gStr();const NS=strs.length;const spb=SPB/tSig;
+  const strs=gStr();const NS=strs.length;const slotsPerBeat=VIS/tSig; // visible slots per beat
   const grid=document.createElement('div');grid.className='tab-grid-wrap';
   const sl=document.createElement('div');sl.className='string-labels';
   strs.forEach((s,si)=>{const l=document.createElement('div');l.className='string-lbl'+(si===NS-1?' low':'');l.textContent=s.n;sl.appendChild(l);});
@@ -1371,19 +1451,21 @@ function buildCanvas(){
     if(bars>1){const x=document.createElement('span');x.className='bar-del';x.textContent='×';x.addEventListener('click',e=>{e.stopPropagation();delBar(b);});bh.appendChild(x);}
     bb.appendChild(bh);const sr=document.createElement('div');sr.className='steps-row';
     const ph=document.createElement('div');ph.className='playhead';ph.id='ph-b-'+b;ph.style.cssText='top:0;height:100%';sr.appendChild(ph);
-    for(let s=0;s<SPB;s++){
-      const step=b*SPB+s;const col=document.createElement('div');col.className='step-col'+(s%spb===0&&s>0?' beat':'');col.id='sc-'+step;
-      if(playing&&ppos===step)col.classList.add('playing');
+    // Draw VIS visible slot-columns (each spans TPS internal steps). Clicking
+    // a slot inserts at the slot's downbeat internal step (v*TPS).
+    for(let v=0;v<VIS;v++){
+      const step=b*SPB+v*TPS;const col=document.createElement('div');col.className='step-col'+(v%slotsPerBeat===0&&v>0?' beat':'');col.id='sc-'+step;
+      if(playing&&ppos>=step&&ppos<step+TPS)col.classList.add('playing');
       strs.forEach((_,si)=>{const lane=document.createElement('div');lane.className='string-lane';const line=document.createElement('div');line.className='string-line';lane.appendChild(line);lane.addEventListener('click',e=>{e.stopPropagation();if(nOwner(si,step)!==null)return;openPop(si,step,e.clientX,e.clientY);});col.appendChild(lane);});
       sr.appendChild(col);
     }
     strs.forEach((_,si)=>{
       for(let s=0;s<SPB;s++){
         const step=b*SPB+s;const note=notes[nk(si,step)];if(!note)continue;
-        const ds=dispS(note);const W=Math.max(28,ds*SW-4);const solidW=note.stac?Math.max(14,W/2):W;
-        const blk=document.createElement('div');blk.className='note-block'+(note.ghost?' ghost':'')+(playing&&ppos===step?' playing':'');
-        blk.id='nb-'+si+'-'+step;blk.style.cssText=`left:${s*SW+2}px;top:${si*44+8}px;width:${W}px`;
-        if(note.dot&&!note.ghost){const bp=note.d*SW-4;const df=document.createElement('div');df.className='dot-fade';df.style.width=Math.max(4,W-Math.max(28,bp))+'px';blk.appendChild(df);}
+        const ds=dispS(note);const W=Math.max(20,(ds/TPS)*SW-4);const solidW=note.stac?Math.max(12,W/2):W;
+        const blk=document.createElement('div');blk.className='note-block'+(note.ghost?' ghost':'')+(note.trip?' trip':'')+(playing&&ppos===step?' playing':'');
+        blk.id='nb-'+si+'-'+step;blk.style.cssText=`left:${stepX(s)+2}px;top:${si*44+8}px;width:${W}px`;
+        if(note.dot&&!note.ghost){const bp=(note.d/TPS)*SW-4;const df=document.createElement('div');df.className='dot-fade';df.style.width=Math.max(4,W-Math.max(20,bp))+'px';blk.appendChild(df);}
         if(note.stac){const sg=document.createElement('div');sg.className='stac-ghost';sg.style.width=(W-solidW)+'px';blk.appendChild(sg);}
         if(note.vib){const vl=document.createElement('div');vl.className='vib-lbl';vl.textContent='~';blk.appendChild(vl);}
         if(note.slide&&W>16){
@@ -1400,10 +1482,10 @@ function buildCanvas(){
         if(note.ghost){const fx=document.createElement('div');fx.className='note-fret';fx.textContent='×';inn.appendChild(fx);}
         else{
           const ff=document.createElement('div');ff.className='note-fret';
-          const stdDurs=[1,2,4,8,16];
           let durSuffix='';
-          if(note.dot) durSuffix='.';
-          else if(!stdDurs.includes(note.d)) durSuffix=`(${note.d})`;
+          if(note.trip) durSuffix='3';
+          else if(note.dot) durSuffix='.';
+          else if(!STD_DURS.includes(note.d)) durSuffix=`(${note.d})`;
           let fretTxt=String(note.fret);
           if(note.slide){
             fretTxt+=note.slide.targets.map(t=>(t>note.fret?'↗':'↘')+t).join('');
@@ -1413,7 +1495,7 @@ function buildCanvas(){
           inn.appendChild(ff);
         }
         blk.appendChild(inn);
-        if(ds>1){const rl=document.createElement('div');rl.className='rh rh-l';rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
+        if(ds>TPS){const rl=document.createElement('div');rl.className='rh rh-l';rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
         const rr=document.createElement('div');rr.className='rh rh-r';rr.textContent='▶';rr.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,+1);});blk.appendChild(rr);
         blk.addEventListener('click',e=>{if(e.target.classList.contains('rh'))return;e.stopPropagation();openPop(si,step,e.clientX,e.clientY);});
         sr.appendChild(blk);
@@ -1488,42 +1570,50 @@ function hlStep(step){
 // ── SVG Preview ────────────────────────────────────────────────────
 function renderSvg(){
   const svg=document.getElementById('tabSvg');if(!svg)return;
-  const strs=gStr();const NS=strs.length;const CW=getCW();const cpl=svgBPL*SPB;const tot=tSteps();
-  const nL=Math.max(1,Math.ceil(tot/cpl));const LH=NS*SVG_SG+44;const W=SVG_LP+cpl*CW+SVG_RP;const H=nL*LH+SVG_TP;
-  const lc='rgba(255,255,255,.1)',blc='rgba(255,255,255,.35)',lbc='rgba(255,255,255,.3)',nc='#2a7fd4',pc='#e8a020';
+  const strs=gStr();const NS=strs.length;const CW=getCW();const tot=tSteps();
+  const stepsPerLine=svgBPL*SPB;               // internal steps per line
+  const SX=CW/TPS;                             // px per internal step (so a visible slot = CW)
+  const barW=SPB*SX;                           // px width of one bar (= VIS*CW)
+  const lineW=svgBPL*barW;                     // px width of one line
+  const nL=Math.max(1,Math.ceil(tot/stepsPerLine));
+  const LH=NS*SVG_SG+44;const W=SVG_LP+lineW+SVG_RP;const H=nL*LH+SVG_TP;
+  const lc='rgba(255,255,255,.1)',blc='rgba(255,255,255,.35)',lbc='rgba(255,255,255,.3)';
+  // x-coordinate (px) of an internal step, relative to the given line start
+  const sx=(stepInLine)=>SVG_LP+stepInLine*SX;
   let h='';
   for(let line=0;line<nL;line++){
-    const ly=SVG_TP+line*LH;const sc=line*cpl;
-    for(let si=0;si<NS;si++){const sy=ly+si*SVG_SG+SVG_SG;h+=`<line x1="${SVG_LP}" y1="${sy}" x2="${SVG_LP+cpl*CW}" y2="${sy}" stroke="${lc}" stroke-width="1"/>`;h+=`<text x="${SVG_LP-3}" y="${sy+4}" text-anchor="end" font-size="11" fill="${lbc}" font-family="monospace">${strs[si].n}</text>`;}
-    for(let bar=0;bar<=svgBPL;bar++){const bx=SVG_LP+bar*SPB*CW;h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${blc}" stroke-width="1.5"/>`;if(bar<svgBPL){const bn=line*svgBPL+bar+1;h+=`<text x="${bx+2}" y="${ly+SVG_SG-7}" font-size="9" fill="${lbc}">${bn}</text>`;}}
-    for(let ci=0;ci<cpl;ci++){const step=sc+ci;if(step>=tot)break;if(step%(SPB/tSig)===0&&step%SPB!==0){const bx=SVG_LP+ci*CW;h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${lc}" stroke-width=".6" stroke-dasharray="2,2"/>`;}}
+    const ly=SVG_TP+line*LH;const sc=line*stepsPerLine;
+    for(let si=0;si<NS;si++){const sy=ly+si*SVG_SG+SVG_SG;h+=`<line x1="${SVG_LP}" y1="${sy}" x2="${SVG_LP+lineW}" y2="${sy}" stroke="${lc}" stroke-width="1"/>`;h+=`<text x="${SVG_LP-3}" y="${sy+4}" text-anchor="end" font-size="11" fill="${lbc}" font-family="monospace">${strs[si].n}</text>`;}
+    for(let bar=0;bar<=svgBPL;bar++){const bx=SVG_LP+bar*barW;h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${blc}" stroke-width="1.5"/>`;if(bar<svgBPL){const bn=line*svgBPL+bar+1;h+=`<text x="${bx+2}" y="${ly+SVG_SG-7}" font-size="9" fill="${lbc}">${bn}</text>`;}}
+    // Beat gridlines (every 12 steps = one quarter), skipping bar lines
+    for(let st=0;st<stepsPerLine;st+=SPB/tSig){const step=sc+st;if(step>=tot)break;if(st%SPB!==0){const bx=sx(st);h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${lc}" stroke-width=".6" stroke-dasharray="2,2"/>`;}}
     // Draw continuations of notes that started in a PREVIOUS line and still sustain into this one
     for(let si=0;si<NS;si++){
       let contStep=null,contNote=null;
-      for(let s=Math.max(0,sc-64);s<sc;s++){
+      for(let s=Math.max(0,sc-96);s<sc;s++){
         const n=notes[nk(si,s)];
         if(n&&!n.ghost&&s+Math.ceil(dispS(n))>sc){contStep=s;contNote=n;}
       }
       if(contNote==null)continue;
       const sy=ly+si*SVG_SG+SVG_SG;
-      const solidEndStep=contStep+contNote.d;          // end of the un-dotted portion
-      const fullEndStep=contStep+dispS(contNote);       // end including dot extension
-      const lineEndStep=sc+cpl;
+      const solidEndStep=contStep+contNote.d;
+      const fullEndStep=contStep+dispS(contNote);
+      const lineEndStep=sc+stepsPerLine;
       const drawEnd=Math.min(fullEndStep,lineEndStep,tot);
       if(drawEnd<=sc)continue;
       const baseOpacity=contNote.stac?.18:.45;
       const solidDrawEnd=Math.min(solidEndStep,drawEnd);
       if(solidDrawEnd>sc){
-        const x1=SVG_LP,x2=SVG_LP+(solidDrawEnd-sc)*CW;
+        const x1=sx(0),x2=sx(solidDrawEnd-sc);
         h+=`<g class="svgn" data-owner="${si}-${contStep}"><line x1="${x1}" y1="${sy}" x2="${x2}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${baseOpacity}"/></g>`;
       }
       if(drawEnd>solidEndStep){
-        const dx1=SVG_LP+Math.max(0,solidEndStep-sc)*CW,dx2=SVG_LP+(drawEnd-sc)*CW;
+        const dx1=sx(Math.max(0,solidEndStep-sc)),dx2=sx(drawEnd-sc);
         h+=`<g class="svgn" data-owner="${si}-${contStep}"><line x1="${dx1}" y1="${sy}" x2="${dx2}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/></g>`;
       }
     }
-    for(let ci=0;ci<cpl;ci++){
-      const step=sc+ci;if(step>=tot)break;const cx=SVG_LP+ci*CW+CW/2;
+    for(let st=0;st<stepsPerLine;st++){
+      const step=sc+st;if(step>=tot)break;const cx=sx(st)+SX/2;
       for(let si=0;si<NS;si++){
         const note=notes[nk(si,step)];if(!note)continue;
         const ig=!!note.ghost,ds=dispS(note),id=!!note.dot,ist=!!note.stac,iv=!!note.vib;
@@ -1536,10 +1626,11 @@ function renderSvg(){
           h+=`<rect x="${cx-r}" y="${sy-r}" width="${r*2}" height="${r*2}" rx="${r}" fill="currentColor"/>`;
           const fsz=fs.length>4?(CW===10?5:7):fs.length>2?(CW===10?6:8):(CW===10?8:11);
           h+=`<text x="${cx}" y="${sy+3}" text-anchor="middle" font-size="${fsz}" font-weight="500" fill="white" font-family="monospace">${fs}</text>`;
-          if(id)h+=`<text x="${cx+r+2}" y="${sy-r+2}" font-size="9" font-weight="700" fill="currentColor">.</text>`;
+          if(note.trip)h+=`<text x="${cx}" y="${sy-r-3}" text-anchor="middle" font-size="7" fill="currentColor">3</text>`;
+          else if(id)h+=`<text x="${cx+r+2}" y="${sy-r+2}" font-size="9" font-weight="700" fill="currentColor">.</text>`;
           if(iv)h+=`<text x="${cx}" y="${sy-r-3}" text-anchor="middle" font-size="8" fill="currentColor">~</text>`;
           if(ist)h+=`<text x="${cx}" y="${sy+r+8}" text-anchor="middle" font-size="8" fill="currentColor">·</text>`;
-          if(ds>1){const bd=note.d,bE=Math.min(step+bd-1-sc,cpl-1),bX=SVG_LP+bE*CW+CW/2+r;if(bX>cx+r+1)h+=`<line x1="${cx+r+1}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${ist?.18:.45}"/>`;if(id){const dE=Math.min(step+ds-1-sc,cpl-1),dX=SVG_LP+dE*CW+CW/2+r;if(dX>bX)h+=`<line x1="${bX}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/>`;}}
+          if(ds>TPS){const bE=Math.min(step+note.d-sc,stepsPerLine),bX=sx(bE)-SX/2+r;if(bX>cx+r+1)h+=`<line x1="${cx+r+1}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${ist?.18:.45}"/>`;if(id){const dE=Math.min(step+ds-sc,stepsPerLine),dX=sx(dE)-SX/2+r;if(dX>bX)h+=`<line x1="${bX}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/>`;}}
         }
         h+=`</g>`;
       }
