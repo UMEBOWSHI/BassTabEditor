@@ -315,9 +315,13 @@ const STRS={
   6:[{n:'C',m:48},{n:'G',m:43},{n:'D',m:38},{n:'A',m:33},{n:'E',m:28},{n:'B',m:23}]
 };
 // Durations in 48-division steps
-const DURS=[{l:'十六分音符',v:3},{l:'八分音符',v:6},{l:'四分音符',v:12},{l:'二分音符',v:24},{l:'全音符',v:48},{l:'八分三連符',v:4},{l:'十六分三連符',v:2}];
+const DURS=[{l:'十六分音符',v:3},{l:'八分音符',v:6},{l:'四分音符',v:12},{l:'二分音符',v:24},{l:'全音符',v:48},{l:'半拍三連符',v:2},{l:'一拍三連符',v:4},{l:'二拍三連符',v:8},{l:'全拍三連符',v:16}];
 // Standard (non-triplet) lengths, used to decide when to show a "(n)" suffix
 const STD_DURS=[3,6,12,24,48];
+// Triplet lengths: half-beat(2), 1-beat(4), 2-beat(8), 4-beat(16) triplet note.
+// A note whose length is one of these is displayed in the triplet color.
+const TRIP_DURS=[2,4,8,16];
+function isTripDur(d){return TRIP_DURS.includes(d);}
 
 const SVG_LP=30,SVG_TP=22,SVG_SG=24,SVG_RP=12;
 let svgBPL=4,autoSc=true;
@@ -856,27 +860,32 @@ function openPop(si,step,mx,my){
   dF.appendChild(fineRow);
   pLeft.appendChild(dF);
 
+  // Maps a splittable note length -> its triplet sub-note length.
+  // 8th(6)->half-beat triplet(2), quarter(12)->1-beat(4), half(24)->2-beat(8), whole(48)->4-beat(16).
+  const TRIP_MAP={6:2,12:4,24:8,48:16};
   function refreshFineUI(){
     fineBtn.textContent=fineMode?'細かい長さ設定: ON':'細かい長さ設定: OFF';
     fineBtn.classList.toggle('on-loop',fineMode);
-    // Triplet-ize only makes sense on a plain quarter note (12 steps) that isn't already a triplet
-    const canTrip=(getCurDurVal()===12&&!isTrip);
+    // Triplet-ize applies to a plain 8th/quarter/half/whole note (not already a triplet-length note)
+    const cur=getCurDurVal();
+    const canTrip=(TRIP_MAP[cur]!=null&&!isTripDur(cur));
     tripBtn.disabled=!canTrip;tripBtn.style.opacity=canTrip?'1':'.4';
-    if(isTrip){fineBtn.disabled=true;fineBtn.style.opacity='.5';fineBtn.title='3連符は常に細かい設定です';}
+    if(isTrip){fineBtn.disabled=true;fineBtn.style.opacity='.5';fineBtn.title='三連符は常に細かい設定です';}
     else{fineBtn.disabled=false;fineBtn.style.opacity='1';fineBtn.title='';}
   }
   fineBtn.addEventListener('click',()=>{if(isTrip)return;fineMode=!fineMode;refreshFineUI();});
-  // "3連符化": split this quarter-note (12 steps) into three 8th-triplet notes (4 steps each),
-  // all inheriting the current fret & articulation. Slide is cleared on the split notes.
+  // "3連符化": split the current note into three equal triplet notes, each inheriting
+  // the current fret & articulation. Slide is cleared on the split notes.
   tripBtn.addEventListener('click',()=>{
-    if(getCurDurVal()!==12||isTrip)return;
+    const cur=getCurDurVal();const sub=TRIP_MAP[cur];
+    if(sub==null||isTripDur(cur))return;
     const fret=parseInt(fI.value);const f=isNaN(fret)?0:fret;
-    // Ensure the three target steps (step, step+4, step+8) are free (besides this note)
-    for(let k=1;k<3;k++){const o=nOwner(si,step+k*4);if(o!==null&&o!==step){alert('3連符化するスペースがありません');return;}}
+    // Ensure the three target steps are free (besides this note)
+    for(let k=1;k<3;k++){const o=nOwner(si,step+k*sub);if(o!==null&&o!==step){alert('3連符化するスペースがありません');return;}}
     for(let k=0;k<3;k++){
-      notes[nk(si,step+k*4)]={fret:f,d:4,ghost:tech==='ghost',dot:false,stac:isStac,vib:tech==='vib',si,slide:null,fine:true,trip:true};
+      notes[nk(si,step+k*sub)]={fret:f,d:sub,ghost:tech==='ghost',dot:false,stac:isStac,vib:tech==='vib',si,slide:null,fine:true,trip:true};
     }
-    ensureB(step+12);
+    ensureB(step+cur);
     closePop();buildCanvas();renderSvg();
   });
 
@@ -1095,8 +1104,8 @@ function openPop(si,step,mx,my){
 
   function buildN(){
     const d=getCurDurVal();
-    const fine=fineMode||isTrip;
-    const trip=isTrip;
+    const fine=fineMode||isTrip||isTripDur(d);
+    const trip=isTrip||isTripDur(d);
     if(tech==='ghost')return{fret:null,d,ghost:true,dot:false,stac:isStac,vib:false,si,slide:null,fine,trip};
     const fret=parseInt(fI.value);
     if(tech==='slide'&&slideState){
@@ -1188,10 +1197,13 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closePop();});
 function ensureB(n){while(bars*SPB<n)bars++;}
 function resizeN(si,step,delta){
   const note=notes[nk(si,step)];if(!note)return;
-  // Coarse mode moves by a whole visible slot (TPS steps = a 16th note);
-  // fine mode (or triplet notes) moves by a single 48-division step.
-  const gran=(note.fine||note.trip)?1:TPS;
-  const nd=Math.max(1,note.d+delta*gran);
+  // Granularity and minimum depend on the mode:
+  //  - coarse: move by a 16th note (TPS=3 steps), minimum length = 16th (3)
+  //  - fine (or triplet note): move by 1 step, minimum length = half-beat triplet (2)
+  const fineOn=(note.fine||note.trip);
+  const gran=fineOn?1:TPS;
+  const minLen=fineOn?2:TPS;
+  const nd=Math.max(minLen,note.d+delta*gran);
   const en=note.dot?nd*1.5:nd;
   for(let s=step+1;s<step+Math.ceil(en);s++){const o=nOwner(si,s);if(o!==null&&o!==step)return;}
   note.d=nd;
@@ -1478,7 +1490,7 @@ function buildCanvas(){
       for(let s=0;s<SPB;s++){
         const step=b*SPB+s;const note=notes[nk(si,step)];if(!note)continue;
         const ds=dispS(note);const W=Math.max(20,(ds/TPS)*SW-4);const solidW=note.stac?Math.max(12,W/2):W;
-        const blk=document.createElement('div');blk.className='note-block'+(note.ghost?' ghost':'')+(note.trip?' trip':'')+(playing&&ppos===step?' playing':'');
+        const blk=document.createElement('div');blk.className='note-block'+(note.ghost?' ghost':'')+(isTripDur(note.d)?' trip':'')+(playing&&ppos===step?' playing':'');
         blk.id='nb-'+si+'-'+step;blk.style.cssText=`left:${stepX(s)+2}px;top:${si*44+8}px;width:${W}px`;
         if(note.dot&&!note.ghost){const bp=(note.d/TPS)*SW-4;const df=document.createElement('div');df.className='dot-fade';df.style.width=Math.max(4,W-Math.max(20,bp))+'px';blk.appendChild(df);}
         if(note.stac){const sg=document.createElement('div');sg.className='stac-ghost';sg.style.width=(W-solidW)+'px';blk.appendChild(sg);}
@@ -1499,7 +1511,7 @@ function buildCanvas(){
           const ff=document.createElement('div');ff.className='note-fret';
           let durSuffix='';
           if(note.dot) durSuffix='.';
-          else if(!note.trip&&!STD_DURS.includes(note.d)) durSuffix=`(${note.d})`;
+          else if(!isTripDur(note.d)&&!STD_DURS.includes(note.d)) durSuffix=`(${note.d})`;
           let fretTxt=String(note.fret);
           if(note.slide){
             fretTxt+=note.slide.targets.map(t=>(t>note.fret?'↗':'↘')+t).join('');
@@ -1572,7 +1584,8 @@ function playStep(step,startTime){
 let lastHlStep=-1;
 function clearHlAt(s){
   if(s<0)return;
-  const col=document.getElementById('sc-'+s);if(col)col.classList.remove('playing');
+  // Match the snapped visible column that setHlAt used
+  const col=document.getElementById('sc-'+(s-(s%TPS)));if(col)col.classList.remove('playing');
   gStr().forEach((_,si)=>{
     const bl=document.getElementById('nb-'+si+'-'+s);if(bl)bl.classList.remove('playing');
     const svgn=document.getElementById('svgn-'+si+'-'+s);if(svgn)svgn.classList.remove('playing');
@@ -1589,9 +1602,15 @@ function setHlAt(s){
     document.querySelectorAll(`[data-owner="${si}-${s}"]`).forEach(c=>c.classList.add('playing'));
   });
 }
+function clearAllPlaying(){
+  document.querySelectorAll('.step-col.playing,.note-block.playing,.svgn.playing').forEach(el=>el.classList.remove('playing'));
+}
 function hlStep(step){
   if(step!==lastHlStep){
-    clearHlAt(lastHlStep);
+    // On a backward jump (loop wrap or skip-back), sweep everything clean so no
+    // passed-column highlight lingers into the next pass.
+    if(step<lastHlStep)clearAllPlaying();
+    else clearHlAt(lastHlStep);
     if(step>=0)setHlAt(step);
     lastHlStep=step;
   }
@@ -1682,7 +1701,7 @@ function renderSvg(){
         const note=notes[nk(si,step)];if(!note)continue;
         const ig=!!note.ghost,ds=dispS(note),id=!!note.dot,ist=!!note.stac,iv=!!note.vib;
         const sy=ly+si*SVG_SG+SVG_SG,r=CW===10?7:9;
-        h+=`<g class="svgn${note.trip?' trip':''}" id="svgn-${si}-${step}">`;
+        h+=`<g class="svgn${isTripDur(note.d)?' trip':''}" id="svgn-${si}-${step}">`;
         if(ig){h+=`<text x="${cx}" y="${sy+4}" text-anchor="middle" font-size="12" font-weight="500" fill="currentColor" font-family="monospace">×</text>`;}
         else{
           let fs=String(note.fret);
