@@ -1549,7 +1549,11 @@ function buildCanvas(){
         }
         blk.appendChild(inn);
         const narrowCls=(note.d<=2)?' narrow':'';
-        if(ds>TPS){const rl=document.createElement('div');rl.className='rh rh-l'+narrowCls;rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
+        // Left (shrink) arrow shows whenever the note is longer than its minimum.
+        // Min is 2 for fine-mode/triplet/off-grid notes, else TPS (16th = 3).
+        const rNeedsFine=note.fine||isTripDur(note.d)||(note.d%TPS!==0)||(step%TPS!==0);
+        const rMin=rNeedsFine?2:TPS;
+        if(note.d>rMin){const rl=document.createElement('div');rl.className='rh rh-l'+narrowCls;rl.textContent='◀';rl.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,-1);});blk.appendChild(rl);}
         const rr=document.createElement('div');rr.className='rh rh-r'+narrowCls;rr.textContent='▶';rr.addEventListener('click',e=>{e.stopPropagation();resizeN(si,step,+1);});blk.appendChild(rr);
         blk.addEventListener('click',e=>{if(e.target.classList.contains('rh'))return;e.stopPropagation();openPop(si,step,e.clientX,e.clientY);});
         sr.appendChild(blk);
