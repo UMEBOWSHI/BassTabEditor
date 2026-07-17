@@ -94,6 +94,9 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .svgn{color:#2a7fd4}
 .svgn.trip{color:#7c3aed}
 .svgn.playing{color:#e8a020}
+.svgn.flash{animation:flashPulse .7s ease-out}
+.note-block.flash{animation:flashPulse .7s ease-out}
+@keyframes flashPulse{0%{filter:brightness(2.2)}100%{filter:brightness(1)}}
 /* Transport */
 .transport-bar{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg2);margin-bottom:10px}
 .transport-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:8px}
@@ -860,27 +863,33 @@ function openPop(si,step,mx,my){
   dF.appendChild(fineRow);
   pLeft.appendChild(dF);
 
-  // Maps a splittable note length -> its triplet sub-note length.
-  // 8th(6)->half-beat triplet(2), quarter(12)->1-beat(4), half(24)->2-beat(8), whole(48)->4-beat(16).
   const TRIP_MAP={6:2,12:4,24:8,48:16};
+  // Whether the current length can be represented on the 16-division grid
+  // (a multiple of TPS=3 steps) and is not itself a triplet length.
+  function canBeCoarse(){const d=getCurDurVal();return d%TPS===0&&!isTripDur(d);}
   function refreshFineUI(){
+    // Fine is forced ON whenever the current length can't live on the 16-division
+    // grid (triplet lengths, or any non-multiple-of-3). Otherwise the user is free
+    // to toggle. So OFF is only *available* when canBeCoarse() is true.
+    if(!canBeCoarse())fineMode=true;
     fineBtn.textContent=fineMode?'細かい長さ設定: ON':'細かい長さ設定: OFF';
     fineBtn.classList.toggle('on-loop',fineMode);
-    // Triplet-ize applies to a plain 8th/quarter/half/whole note (not already a triplet-length note)
     const cur=getCurDurVal();
     const canTrip=(TRIP_MAP[cur]!=null&&!isTripDur(cur));
     tripBtn.disabled=!canTrip;tripBtn.style.opacity=canTrip?'1':'.4';
-    if(isTrip){fineBtn.disabled=true;fineBtn.style.opacity='.5';fineBtn.title='三連符は常に細かい設定です';}
-    else{fineBtn.disabled=false;fineBtn.style.opacity='1';fineBtn.title='';}
+    // The fine button is only lockable (disabled) when OFF isn't allowed AND it's ON.
+    const lockOn=!canBeCoarse();
+    fineBtn.disabled=lockOn;fineBtn.style.opacity=lockOn?'.6':'1';
+    fineBtn.title=lockOn?'この長さ（三連符や16分割に乗らない長さ）では細かい設定が必要です':'';
   }
-  fineBtn.addEventListener('click',()=>{if(isTrip)return;fineMode=!fineMode;refreshFineUI();});
-  // "3連符化": split the current note into three equal triplet notes, each inheriting
-  // the current fret & articulation. Slide is cleared on the split notes.
+  fineBtn.addEventListener('click',()=>{
+    if(!canBeCoarse())return; // can't turn OFF while the length requires fine
+    fineMode=!fineMode;refreshFineUI();
+  });
   tripBtn.addEventListener('click',()=>{
     const cur=getCurDurVal();const sub=TRIP_MAP[cur];
     if(sub==null||isTripDur(cur))return;
     const fret=parseInt(fI.value);const f=isNaN(fret)?0:fret;
-    // Ensure the three target steps are free (besides this note)
     for(let k=1;k<3;k++){const o=nOwner(si,step+k*sub);if(o!==null&&o!==step){alert('3連符化するスペースがありません');return;}}
     for(let k=0;k<3;k++){
       notes[nk(si,step+k*sub)]={fret:f,d:sub,ghost:tech==='ghost',dot:false,stac:isStac,vib:tech==='vib',si,slide:null,fine:true,trip:true};
@@ -1413,7 +1422,16 @@ document.getElementById('skipBarBack').addEventListener('click',()=>skipBars(-1)
 document.getElementById('skipBarFwd').addEventListener('click',()=>skipBars(+1));
 document.getElementById('skip4Back').addEventListener('click',()=>skipBars(-4));
 document.getElementById('skip4Fwd').addEventListener('click',()=>skipBars(+4));
-document.getElementById('clearBtn').addEventListener('click',()=>{stopPlay();notes={};ppos=0;bars=1;buildCanvas();renderSvg();updatePbar();});
+document.getElementById('clearBtn').addEventListener('click',()=>{
+  stopPlay();notes={};ppos=0;bars=1;
+  setSpeed(1); // reset playback speed to 1x
+  if(loopOn){ // turn loop off
+    loopOn=false;
+    const lb=document.getElementById('loopBtn');lb.textContent='🔁 ループ OFF';lb.classList.remove('on-loop');
+    document.getElementById('loopRow').style.display='none';
+  }
+  buildCanvas();renderSvg();updatePbar();updatePbarMarks();
+});
 document.getElementById('timeSig').addEventListener('change',function(){tSig=parseInt(this.value);stopPlay();notes={};ppos=0;buildCanvas();renderSvg();updatePbar();});
 // String count change: keep notes, remove notes for strings that no longer exist
 document.getElementById('stringSel').addEventListener('change',function(){
@@ -1624,22 +1642,26 @@ function hlStep(step){
 function scrollPreviewToBar(b){
   const wrap=document.getElementById('tabViewScroll');const svg=document.getElementById('tabSvg');
   if(!wrap||!svg)return;
-  const NS=gStr().length;const CW=getCW();const SX=CW/TPS;const barW=SPB*SX;
-  const stepsPerLine=svgBPL*SPB;const LH=NS*SVG_SG+44;
-  const startStep=b*SPB;
-  const line=Math.floor(startStep/stepsPerLine);
-  const colInLine=b%svgBPL;
+  const NS=gStr().length;const stepsPerLine=svgBPL*SPB;const LH=NS*SVG_SG+44;
+  const line=Math.floor((b*SPB)/stepsPerLine);
   const tY=line*LH;
-  const tX=SVG_LP+colInLine*barW-8;
   wrap.scrollTo({top:tY,behavior:'smooth'});
-  wrap.scrollTo({left:Math.max(0,tX),behavior:'smooth'});
+  // Feedback flash: briefly pulse the notes belonging to this bar
+  const s0=b*SPB,e0=s0+SPB;
+  const flashed=[];
+  gStr().forEach((_,si)=>{for(let s=s0;s<e0;s++){const el=document.getElementById('svgn-'+si+'-'+s);if(el){el.classList.add('flash');flashed.push(el);}}});
+  setTimeout(()=>flashed.forEach(el=>el.classList.remove('flash')),700);
 }
 // Scroll the note-input area horizontally so the given bar is visible.
 function scrollInputToBar(b){
   const sc=document.querySelector('.tab-scroll');if(!sc)return;
-  // Each bar block is one child of .bars-area; approximate by bar width = VIS*SW
   const barPx=VIS*SW;
   sc.scrollTo({left:Math.max(0,b*barPx-8),behavior:'smooth'});
+  // Feedback flash on the input-area note blocks of this bar
+  const s0=b*SPB,e0=s0+SPB;
+  const flashed=[];
+  gStr().forEach((_,si)=>{for(let s=s0;s<e0;s++){const el=document.getElementById('nb-'+si+'-'+s);if(el){el.classList.add('flash');flashed.push(el);}}});
+  setTimeout(()=>flashed.forEach(el=>el.classList.remove('flash')),700);
 }
 // Delegated click on SVG bar numbers -> scroll the input area to that bar
 document.getElementById('tabSvg').addEventListener('click',e=>{
