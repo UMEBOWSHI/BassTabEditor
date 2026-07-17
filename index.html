@@ -824,12 +824,11 @@ function openPop(si,step,mx,my){
   inner.appendChild(pLeft);inner.appendChild(pRight);pop.appendChild(inner);
 
   let isDot=!!(ex?.dot),isStac=!!(ex?.stac);
-  // fineMode is derived from whether the note currently *requires* fine mode
-  // (triplet length, non-multiple-of-3 length, or off-grid start position),
-  // rather than a stored flag — so a note whose length is now coarse-compatible
-  // opens with the toggle OFF and switchable. Set properly by refreshFineUI().
+  // fineMode starts from the note's stored fine flag (so the user's choice
+  // persists across reopen). refreshFineUI() will force it ON when the current
+  // length/position strictly requires fine mode, but never auto-switches it OFF.
   let isTrip=false;
-  let fineMode=false;
+  let fineMode=!!(ex?.fine);
   let tech=ex?(ex.ghost?'ghost':ex.slide?'slide':ex.vib?'vib':'none'):'none';
   // Working copy of slide state (deep copy)
   let slideState=ex?.slide?{targets:ex.slide.targets.slice(),durations:ex.slide.durations.slice()}:null;
