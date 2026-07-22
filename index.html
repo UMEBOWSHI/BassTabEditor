@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google-site-verification" content="zrvaRkCMaoIkopVidZuH9JteueUaKaNOmAluN2LMt9w" />
 <title>Bass Tab Editor</title>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8413396585955977"
-     crossorigin="anonymous"></script>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8413396585955977" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1309,35 +1308,34 @@ function updatePbarMarks(){
 // merely polls whether it's time to push more notes into the lookahead window.
 const SCHED_AHEAD_SEC=0.12; // how far ahead of "now" we schedule audio
 const SCHED_POLL_MS=25;     // how often the scheduler polls
-let nextStepTime=0;
+let nextStepTime=0,schedStep=0;
 
 function resumeFrom(pos){
-  ppos=pos;initAudio();actx.resume().then(()=>{
-    playing=true;ptempo=effTempo();pst=performance.now();psp=ppos;
+  ppos=pos;schedStep=pos;initAudio();actx.resume().then(()=>{
+    playing=true;ptempo=effTempo();
+    // Reset visual-clock anchor; scheduler() will set pst/psp from the first
+    // step's precise audio time, then animPH derives the playhead from there.
+    schedAnchored=false;psp=-1;animLastStep=-1;phLastScrollLine=-1;
     document.getElementById('playBtn').textContent='⏸ 一時停止';
     document.getElementById('sdot').classList.add('playing');
     document.getElementById('statusTxt').textContent='再生中...';
-    animPH();
     nextStepTime=actx.currentTime+0.05;
     scheduler();
+    animPH();
   });
 }
 function scheduler(){
   if(!playing)return;
   while(nextStepTime<actx.currentTime+SCHED_AHEAD_SEC){
-    const playingStep=ppos;
+    const playingStep=schedStep;
     const fireAt=nextStepTime;
     playStep(playingStep,fireAt);
     if(metroOn&&playingStep%metroDur===0){
       playClick(playingStep%SPB===0,fireAt); // strong on bar downbeat, weak otherwise
     }
-    const delayMs=Math.max(0,(fireAt-actx.currentTime)*1000);
-    setTimeout(()=>{
-      if(!playing)return; // stale callback from before a pause/stop — ignore
-      hlStep(playingStep);
-      pst=performance.now();psp=playingStep;ptempo=effTempo();
-      updatePbar();
-    },delayMs);
+    // Anchor the visual clock to the first scheduled step so animPH can derive
+    // the current play position from AudioContext time (no per-step setTimeout).
+    if(!schedAnchored){pst=performance.now()+(fireAt-actx.currentTime)*1000;psp=playingStep;ptempo=effTempo();schedAnchored=true;}
     const stepDurSec=(60/effTempo())*(1/12); // one 48-division step, scaled by tempo AND playback speed
     nextStepTime+=stepDurSec;
     let next=playingStep+1;
@@ -1345,11 +1343,11 @@ function scheduler(){
       const ts=tSteps();
       const ls=(loopSBar!=null?Math.max(0,(loopSBar-1)*SPB):0);
       const le=(loopEBar!=null?Math.min(ts,loopEBar*SPB):ts);
-      if(next>=le)next=ls;
+      if(next>=le){next=ls;schedAnchored=false;animLastStep=-1;} // wrap: re-anchor visual clock
     } else {
-      if(next>=tSteps())next=0;
+      if(next>=tSteps()){next=0;schedAnchored=false;animLastStep=-1;}
     }
-    ppos=next;
+    schedStep=next;
   }
   ptimer=setTimeout(scheduler,SCHED_POLL_MS);
 }
@@ -1455,18 +1453,35 @@ document.getElementById('stringSel').addEventListener('change',function(){
 });
 
 // ── Playhead anim ─────────────────────────────────────────────────
+let phLine=null,phSvgEl=null,phScrollEl=null,phLastScrollLine=-1,schedAnchored=false,animLastStep=-1;
 function animPH(){
   if(!playing){cancelAnimationFrame(afId);return;}
   const el=(performance.now()-pst)/1000,sd=(60/ptempo)*(1/12),pos=(psp+el/sd); // sd = one 48-division step in sec
   const ts=tSteps();const safePos=((pos%ts)+ts)%ts;
+  const curStep=Math.floor(safePos);
+  // Visual highlight + scrub bar update only when the integer step changes
+  // (not every frame). This replaces the old per-step setTimeout chain.
+  if(curStep!==animLastStep){
+    ppos=curStep; // keep ppos in sync for updatePbar/hlStep/updGP
+    hlStep(curStep);
+    updatePbar();
+    animLastStep=curStep;
+  }
   const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,NS=gStr().length;
   const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=SVG_LP+ci*SX,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
-  const svg=document.getElementById('tabSvg');
+  if(!phSvgEl)phSvgEl=document.getElementById('tabSvg');
+  const svg=phSvgEl;
   if(svg){
-    let ln=svg.querySelector('.svgph');
-    if(!ln){ln=document.createElementNS('http://www.w3.org/2000/svg','line');ln.classList.add('svgph');ln.setAttribute('stroke','#2a7fd4');ln.setAttribute('stroke-width','1.5');svg.appendChild(ln);}
-    ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+SVG_SG-12);ln.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);ln.setAttribute('opacity','1');
-    if(autoSc){const w=document.getElementById('tabViewScroll');if(w){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.8)w.scrollTo({top:tY,behavior:'smooth'});}}
+    if(!phLine||phLine.parentNode!==svg){
+      phLine=svg.querySelector('.svgph');
+      if(!phLine){phLine=document.createElementNS('http://www.w3.org/2000/svg','line');phLine.classList.add('svgph');phLine.setAttribute('stroke','#2a7fd4');phLine.setAttribute('stroke-width','1.5');svg.appendChild(phLine);}
+    }
+    phLine.setAttribute('x1',cx);phLine.setAttribute('x2',cx);phLine.setAttribute('y1',ly+SVG_SG-12);phLine.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);phLine.setAttribute('opacity','1');
+    if(autoSc){
+      if(!phScrollEl)phScrollEl=document.getElementById('tabViewScroll');
+      const w=phScrollEl;
+      if(w&&li!==phLastScrollLine){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.5){w.scrollTo({top:tY,behavior:'smooth'});phLastScrollLine=li;}}
+    }
   }
   afId=requestAnimationFrame(animPH);
 }
@@ -1757,6 +1772,7 @@ function renderSvg(){
     }
   }
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('width',W);svg.setAttribute('height',H);svg.innerHTML=h;
+  phLine=null;phLastScrollLine=-1; // SVG innerHTML replaced; cached playhead line is stale
   const wrap=document.getElementById('tabViewScroll');if(wrap){const tH=LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=nL>2?'auto':'hidden';}
 }
 
