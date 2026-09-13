@@ -479,6 +479,35 @@ function initAudio(){
 }
 function getM(){initAudio();return mgain}
 
+// ── Mobile audio warm-up ────────────────────────────────────────────
+// On iOS Safari in particular, the very first time an AudioContext is
+// created/resumed in a page's lifetime, there can be a real delay before
+// the audio hardware session actually activates -- during that window
+// ctx.currentTime barely advances even though wall-clock time is passing.
+// If that delay happens to land on the first press of "再生", audio starts
+// noticeably late. Priming the context on the very first tap/click/key
+// anywhere on the page (long before Play is likely to be pressed) lets that
+// one-time hardware warm-up happen ahead of time instead.
+(function(){
+  let warmed=false;
+  function warmAudio(){
+    if(warmed)return;warmed=true;
+    try{
+      const ctx=initAudio();
+      ctx.resume().then(()=>{
+        const b=ctx.createBuffer(1,1,ctx.sampleRate);
+        const s=ctx.createBufferSource();s.buffer=b;s.connect(ctx.destination);s.start(0);
+      });
+    }catch(e){}
+    document.removeEventListener('touchstart',warmAudio);
+    document.removeEventListener('mousedown',warmAudio);
+    document.removeEventListener('keydown',warmAudio);
+  }
+  document.addEventListener('touchstart',warmAudio,{once:true,passive:true});
+  document.addEventListener('mousedown',warmAudio,{once:true});
+  document.addEventListener('keydown',warmAudio,{once:true});
+})();
+
 // Kill all audio immediately – use AudioContext suspend then resume
 function silenceNow(){
   if(!actx)return;
@@ -608,6 +637,7 @@ document.getElementById('settingsToggle').addEventListener('click',function(){
   const panel=document.getElementById('settingsPanel');
   const collapsed=panel.classList.toggle('collapsed');
   this.classList.toggle('collapsed',collapsed);
+  schedulePbarMarksRefresh();
 });
 document.getElementById('tm').addEventListener('click',()=>setTempo(tempo-1));
 document.getElementById('tp').addEventListener('click',()=>setTempo(tempo+1));
@@ -1335,6 +1365,19 @@ function updatePbarMarks(){
   }
   svgEl.setAttribute('viewBox',`0 0 ${W} 28`);svgEl.innerHTML=h;
 }
+// Marks are positioned against the pbar's rendered pixel width at the time
+// they were drawn. Screen rotation, window resize, or a layout change (e.g.
+// the settings panel opening/closing) can change that width without us
+// knowing, leaving the marks/loop-range visually offset from the real bars.
+// Re-measure and redraw whenever the layout might have changed.
+let pbarResizeTimer=null;
+function schedulePbarMarksRefresh(){
+  clearTimeout(pbarResizeTimer);
+  pbarResizeTimer=setTimeout(updatePbarMarks,80);
+}
+window.addEventListener('resize',schedulePbarMarksRefresh);
+if(window.visualViewport)window.visualViewport.addEventListener('resize',schedulePbarMarksRefresh);
+window.addEventListener('orientationchange',schedulePbarMarksRefresh);
 
 // Playbar scrub
 (function(){
@@ -1373,20 +1416,44 @@ function updatePbarMarks(){
 // merely polls whether it's time to push more notes into the lookahead window.
 const SCHED_AHEAD_SEC=0.12; // how far ahead of "now" we schedule audio
 const SCHED_POLL_MS=25;     // how often the scheduler polls
-let nextStepTime=0,schedStep=0;
+let nextStepTime=0,schedStep=0,playGen=0;
+
+// Waits until ctx.currentTime is demonstrably advancing at roughly real
+// speed before starting playback, so the scheduler and the visual playhead
+// (which runs on wall-clock time) begin from the same true starting point.
+// Without this, a slow-to-wake audio clock lets the playhead race ahead
+// while nothing actually gets scheduled, so sound starts audibly late and
+// out of sync with what's already showing on screen.
+function waitForAudioClock(myToken,cb){
+  const t0=actx.currentTime,rt0=performance.now();
+  function check(){
+    if(myToken!==playGen)return; // superseded by a newer play/stop — abandon
+    const elapsedReal=(performance.now()-rt0)/1000;
+    const elapsedCtx=actx.currentTime-t0;
+    if(elapsedCtx>=elapsedReal*0.5||elapsedReal>0.7){cb();return;}
+    requestAnimationFrame(check);
+  }
+  check();
+}
 
 function resumeFrom(pos){
-  ppos=pos;schedStep=pos;initAudio();actx.resume().then(()=>{
-    playing=true;ptempo=effTempo();
-    // Reset visual-clock anchor; scheduler() will set pst/psp from the first
-    // step's precise audio time, then animPH derives the playhead from there.
-    schedAnchored=false;psp=-1;animLastStep=-1;phLastScrollLine=-1;
-    document.getElementById('playBtn').textContent='⏸ 一時停止';
-    document.getElementById('sdot').classList.add('playing');
-    document.getElementById('statusTxt').textContent='再生中...';
-    nextStepTime=actx.currentTime+0.05;
-    scheduler();
-    animPH();
+  ppos=pos;schedStep=pos;initAudio();
+  const myToken=++playGen;
+  actx.resume().then(()=>{
+    if(myToken!==playGen)return; // stop/another play happened while waiting
+    waitForAudioClock(myToken,()=>{
+      if(myToken!==playGen)return;
+      playing=true;ptempo=effTempo();
+      // Reset visual-clock anchor; scheduler() will set pst/psp from the first
+      // step's precise audio time, then animPH derives the playhead from there.
+      schedAnchored=false;psp=-1;animLastStep=-1;phLastScrollLine=-1;
+      document.getElementById('playBtn').textContent='⏸ 一時停止';
+      document.getElementById('sdot').classList.add('playing');
+      document.getElementById('statusTxt').textContent='再生中...';
+      nextStepTime=actx.currentTime+0.05;
+      scheduler();
+      animPH();
+    });
   });
 }
 function scheduler(){
@@ -1438,7 +1505,7 @@ document.addEventListener('visibilitychange',()=>{
 
 function startPlay(fromStart){
   if(playing){
-    playing=false;clearTimeout(ptimer);cancelAnimationFrame(afId);
+    playing=false;++playGen;clearTimeout(ptimer);cancelAnimationFrame(afId);
     silenceNow();
     document.getElementById('playBtn').textContent='▶ 再生';
     document.getElementById('sdot').classList.remove('playing');
@@ -1456,7 +1523,7 @@ function startPlay(fromStart){
   resumeFrom(ppos);
 }
 function stopPlay(){
-  playing=false;clearTimeout(ptimer);hidePH();
+  playing=false;++playGen;clearTimeout(ptimer);hidePH();
   silenceNow();
   document.getElementById('playBtn').textContent='▶ 再生';
   document.getElementById('sdot').classList.remove('playing');
