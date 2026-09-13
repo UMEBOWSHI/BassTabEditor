@@ -270,7 +270,9 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="hint">弦の線をクリックして音符を追加。再生バーをドラッグして位置移動。</div>
 <div class="tab-scroll"><div class="tab-canvas-wrap" id="tabCanvas"></div></div>
 <div class="divider"><span>タブ譜プレビュー</span><hr>
-  <button class="btn sm" id="barsToggle">2小節表示</button>
+  <button class="btn sm" id="bpl1">1小節表示</button>
+  <button class="btn sm" id="bpl2">2小節表示</button>
+  <button class="btn sm active" id="bpl4">4小節表示</button>
   <button class="btn sm active" id="scrollToggle">自動スクロール ON</button>
 </div>
 <div class="tab-view-outer"><div class="tab-view-scroll" id="tabViewScroll"><svg id="tabSvg" class="tab-svg"></svg></div></div>
@@ -330,7 +332,7 @@ function isTripDur(d){return TRIP_DURS.includes(d);}
 
 const SVG_LP=30,SVG_TP=22,SVG_SG=24,SVG_RP=12;
 let svgBPL=4,autoSc=true;
-function getCW(){return svgBPL===4?10:20}
+function getCW(){return svgBPL===4?10:svgBPL===2?20:40}
 
 let playing=false,ptimer=null,ppos=0;
 let afId=null,pst=0,psp=0,ptempo=80;
@@ -585,7 +587,10 @@ document.getElementById('tp').addEventListener('click',()=>setTempo(tempo+1));
 document.getElementById('volSl').addEventListener('input',function(){setVol(parseInt(this.value))});
 document.getElementById('vm').addEventListener('click',()=>setVol(volDisp-1));
 document.getElementById('vp').addEventListener('click',()=>setVol(volDisp+1));
-document.getElementById('barsToggle').addEventListener('click',function(){svgBPL=svgBPL===4?2:4;this.textContent=svgBPL===4?'2小節表示':'4小節表示';renderSvg();});
+function setBPL(n){svgBPL=n;['bpl1','bpl2','bpl4'].forEach(id=>{const b=document.getElementById(id);if(b)b.classList.toggle('active',id==='bpl'+n);});renderSvg();}
+document.getElementById('bpl1').addEventListener('click',()=>setBPL(1));
+document.getElementById('bpl2').addEventListener('click',()=>setBPL(2));
+document.getElementById('bpl4').addEventListener('click',()=>setBPL(4));
 document.getElementById('scrollToggle').addEventListener('click',function(){autoSc=!autoSc;this.textContent=autoSc?'自動スクロール ON':'自動スクロール OFF';this.classList.toggle('active',autoSc);});
 
 // ── Metronome ──────────────────────────────────────────────────────
@@ -1326,6 +1331,14 @@ function resumeFrom(pos){
 }
 function scheduler(){
   if(!playing)return;
+  // Safety net: if the JS thread was stalled for a while (e.g. a heavy
+  // reflow during a screen rotation) and we've fallen far behind real time,
+  // don't fire every missed step in a rapid-fire burst (crackle/noise).
+  // Jump the clock forward and re-anchor the visual playhead instead.
+  if(nextStepTime<actx.currentTime-0.5){
+    nextStepTime=actx.currentTime+0.05;
+    schedAnchored=false;
+  }
   while(nextStepTime<actx.currentTime+SCHED_AHEAD_SEC){
     const playingStep=schedStep;
     const fireAt=nextStepTime;
@@ -1351,6 +1364,17 @@ function scheduler(){
   }
   ptimer=setTimeout(scheduler,SCHED_POLL_MS);
 }
+
+// ── Mobile robustness: auto-pause when the app is backgrounded ─────────
+// iOS/Android suspend JS timers and can suspend the AudioContext itself when
+// the tab/app goes to the background (home button, app switch, screen lock,
+// sometimes during an orientation change). If playback kept "running" in
+// that state, resuming would try to catch up a stale clock -> noise, dropped
+// audio, or a playhead that no longer matches what's actually sounding.
+// Simplest and most reliable: treat backgrounding as an explicit pause.
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden&&playing){startPlay(false);}
+});
 
 function startPlay(fromStart){
   if(playing){
@@ -1765,7 +1789,16 @@ function renderSvg(){
           if(id)h+=`<text x="${cx+r+2}" y="${sy-r+2}" font-size="9" font-weight="700" fill="currentColor">.</text>`;
           if(iv)h+=`<text x="${cx}" y="${sy-r-3}" text-anchor="middle" font-size="8" fill="currentColor">~</text>`;
           if(ist)h+=`<text x="${cx}" y="${sy+r+8}" text-anchor="middle" font-size="8" fill="currentColor">·</text>`;
-          if(ds>TPS){const bE=Math.min(step+note.d-sc,stepsPerLine),bX=sx(bE)-SX/2+r;if(bX>cx+r+1)h+=`<line x1="${cx+r+1}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${ist?.18:.45}"/>`;if(id){const dE=Math.min(step+ds-sc,stepsPerLine),dX=sx(dE)-SX/2+r;if(dX>bX)h+=`<line x1="${bX}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/>`;}}
+          if(ds>TPS){
+            const bTrueEnd=step+note.d-sc,bE=Math.min(bTrueEnd,stepsPerLine),bClip=bTrueEnd>stepsPerLine;
+            const bX=bClip?sx(bE):sx(bE)+SX/2-r;
+            if(bX>cx+r+1)h+=`<line x1="${cx+r+1}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${ist?.18:.45}"/>`;
+            if(id){
+              const dTrueEnd=step+ds-sc,dE=Math.min(dTrueEnd,stepsPerLine),dClip=dTrueEnd>stepsPerLine;
+              const dX=dClip?sx(dE):sx(dE)+SX/2-r;
+              if(dX>bX)h+=`<line x1="${bX}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/>`;
+            }
+          }
         }
         h+=`</g>`;
       }
