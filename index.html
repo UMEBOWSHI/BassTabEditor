@@ -99,12 +99,15 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .add-bar-btn:hover{opacity:.8}
 /* SVG preview */
 .tab-view-outer{border:1px solid var(--border);border-radius:8px;background:var(--bg2)}
-.tab-view-scroll{overflow-x:auto;overflow-y:auto}
-.tab-svg{display:block}
-.svgn{color:#2a7fd4}
-.svgn.trip{color:#7c3aed}
+.tab-view-scroll{overflow-x:auto;overflow-y:auto;border-radius:7px}
+.tab-view-scroll.pv-light{--pv-fg:#111;background:#fff}
+.tab-view-scroll.pv-dark{--pv-fg:#f2f2f2;background:#000}
+.tab-svg{display:block;color:var(--pv-fg,#111)}
+.svgn{color:var(--pv-fg,#111)}
 .svgn.playing{color:#e8a020}
-.svgn.flash{animation:flashPulse .7s ease-out}
+.svgn.flash{animation:svgFlash .7s ease-out}
+@keyframes svgFlash{0%{color:#e8a020}100%{color:var(--pv-fg,#111)}}
+.pv-opts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .note-block.flash{animation:flashPulse .7s ease-out}
 @keyframes flashPulse{0%{filter:brightness(2.2)}100%{filter:brightness(1)}}
 /* Transport */
@@ -296,6 +299,15 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   <button class="btn sm" id="bpl2">2小節表示</button>
   <button class="btn sm active" id="bpl4">4小節表示</button>
   <button class="btn sm active" id="scrollToggle">自動スクロール ON</button>
+</div>
+<div class="pv-opts">
+  <span class="lbl">表記</span>
+  <button class="btn sm" id="pvA" title="タブ譜＋棒・旗・連桁・休符・タイ">A 標準</button>
+  <button class="btn sm" id="pvB" title="数字＋長さの線のみ">B 長さ線</button>
+  <button class="btn sm" id="pvC" title="五線譜(ヘ音記号)＋タブ譜の2段">C 五線譜つき</button>
+  <span class="lbl" style="margin-left:10px">背景</span>
+  <button class="btn sm" id="pvLight">白背景</button>
+  <button class="btn sm" id="pvDark">黒背景</button>
 </div>
 <div class="tab-view-outer"><div class="tab-view-scroll" id="tabViewScroll"><svg id="tabSvg" class="tab-svg"></svg></div></div>
 <div class="divider"><span>保存・読み込み</span><hr></div>
@@ -1618,8 +1630,8 @@ function animPH(){
     updatePbar();
     animLastStep=curStep;
   }
-  const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,NS=gStr().length;
-  const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=SVG_LP+ci*SX,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
+  const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,PL=pvLayout();
+  const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=PL.LP+ci*SX,LH=PL.LH,ly=SVG_TP+li*LH;
   if(!phSvgEl)phSvgEl=document.getElementById('tabSvg');
   const svg=phSvgEl;
   if(svg){
@@ -1627,7 +1639,7 @@ function animPH(){
       phLine=svg.querySelector('.svgph');
       if(!phLine){phLine=document.createElementNS('http://www.w3.org/2000/svg','line');phLine.classList.add('svgph');phLine.setAttribute('stroke','#2a7fd4');phLine.setAttribute('stroke-width','1.5');svg.appendChild(phLine);}
     }
-    phLine.setAttribute('x1',cx);phLine.setAttribute('x2',cx);phLine.setAttribute('y1',ly+SVG_SG-12);phLine.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);phLine.setAttribute('opacity','1');
+    phLine.setAttribute('x1',cx);phLine.setAttribute('x2',cx);phLine.setAttribute('y1',ly+PL.phY1);phLine.setAttribute('y2',ly+PL.phY2);phLine.setAttribute('opacity','1');
     if(autoSc){
       if(!phScrollEl)phScrollEl=document.getElementById('tabViewScroll');
       const w=phScrollEl;
@@ -1643,12 +1655,12 @@ function updGP(step){for(let b=0;b<bars;b++){const ph=document.getElementById('p
 function updateSvgPH(step){
   const svg=document.getElementById('tabSvg');if(!svg)return;
   if(step<0){const l=svg.querySelector('.svgph');if(l)l.setAttribute('opacity','0');return;}
-  const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,NS=gStr().length;
+  const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,PL=pvLayout();
   const ts=tSteps();const safePos=((step%ts)+ts)%ts;
-  const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=SVG_LP+ci*SX,LH=NS*SVG_SG+44,ly=SVG_TP+li*LH;
+  const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=PL.LP+ci*SX,LH=PL.LH,ly=SVG_TP+li*LH;
   let ln=svg.querySelector('.svgph');
   if(!ln){ln=document.createElementNS('http://www.w3.org/2000/svg','line');ln.classList.add('svgph');ln.setAttribute('stroke','#2a7fd4');ln.setAttribute('stroke-width','1.5');svg.appendChild(ln);}
-  ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+SVG_SG-12);ln.setAttribute('y2',ly+NS*SVG_SG+SVG_SG+8);ln.setAttribute('opacity','1');
+  ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+PL.phY1);ln.setAttribute('y2',ly+PL.phY2);ln.setAttribute('opacity','1');
   if(autoSc){const w=document.getElementById('tabViewScroll');if(w){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.8)w.scrollTo({top:tY,behavior:'smooth'});}}
 }
 
@@ -1824,7 +1836,7 @@ function hlStep(step){
 function scrollPreviewToBar(b){
   const wrap=document.getElementById('tabViewScroll');const svg=document.getElementById('tabSvg');
   if(!wrap||!svg)return;
-  const NS=gStr().length;const stepsPerLine=svgBPL*SPB;const LH=NS*SVG_SG+44;
+  const stepsPerLine=svgBPL*SPB;const LH=pvLayout().LH;
   const line=Math.floor((b*SPB)/stepsPerLine);
   const tY=line*LH;
   wrap.scrollTo({top:tY,behavior:'smooth'});
@@ -1855,86 +1867,363 @@ document.getElementById('tabSvg').addEventListener('click',e=>{
 });
 
 // ── SVG Preview ────────────────────────────────────────────────────
+// Three notation patterns:
+//   A: tab + rhythm marks (stems/flags/beams/rests/ties) under the tab
+//   B: tab numbers + duration lines only
+//   C: bass-clef staff (top) + tab (bottom), two rows per system
+// Theme: 'light' (white bg / black notation) or 'dark' (black bg / white).
+let pvPat='A',pvTheme='light';
+try{
+  const _p=localStorage.getItem('bte_pvPat');if(_p==='A'||_p==='B'||_p==='C')pvPat=_p;
+  const _t=localStorage.getItem('bte_pvTheme');if(_t==='light'||_t==='dark')pvTheme=_t;
+}catch(e){}
+
+// Vertical layout of one system (line of bars). All y values are relative to
+// the system's top (ly). animPH / updateSvgPH / scrollPreviewToBar share it.
+function pvLayout(){
+  const NS=gStr().length;
+  if(pvPat==='C'){
+    const SG=20,staffTop=36,t0=116,tabLast=t0+(NS-1)*SG;
+    return{pat:'C',NS,SG,LP:56,t0,staffTop,tabLast,LH:tabLast+30,phY1:22,phY2:tabLast+10,barNumY:18};
+  }
+  const SG=SVG_SG,tabLast=SG*NS;
+  if(pvPat==='A')return{pat:'A',NS,SG,LP:SVG_LP,t0:SG,tabLast,LH:tabLast+56,phY1:SG-12,phY2:tabLast+40,barNumY:SG-9};
+  return{pat:'B',NS,SG,LP:SVG_LP,t0:SG,tabLast,LH:NS*SG+44,phY1:SG-12,phY2:tabLast+14,barNumY:SG-7};
+}
+
+// k: 0 whole,1 half,2 quarter,3 eighth,4 sixteenth,5 thirty-second. (12 steps = quarter)
+const PV_SPEC={48:{k:0},36:{k:1,dot:1},24:{k:1},18:{k:2,dot:1},12:{k:2},9:{k:3,dot:1},6:{k:3},4.5:{k:4,dot:1},3:{k:4},
+  16:{k:1,trip:1},8:{k:2,trip:1},4:{k:3,trip:1},2:{k:4,trip:1},1:{k:5,trip:1}};
+function pvSplitLen(len,isTrip){
+  const list=isTrip?[16,8,4,2,1]:[48,36,24,18,12,9,6,4.5,3,2,1];
+  const out=[];let rem=len,g=0;
+  while(rem>0.74&&g++<40){let v=null;for(const c of list){if(c<=rem+1e-6){v=c;break;}}if(v==null)break;out.push(v);rem-=v;}
+  return out;
+}
+function pvRests(from,to,out){
+  let pos=from,g=0;
+  while(to-pos>0.74&&g++<400){
+    if(Math.abs(pos-Math.round(pos))>1e-6){pos=Math.ceil(pos-1e-6);continue;}
+    const r=pos%SPB,maxLen=Math.min(to,pos-r+SPB)-pos;
+    const grid=(Math.round(pos)%3===0)?[48,24,12,6,3]:[16,8,4,2,1];
+    let v=null;for(const c of grid){if(c<=maxLen+1e-6&&r%c===0){v=c;break;}}
+    if(v==null)v=Math.min(1,maxLen);
+    out.push({kind:'r',start:pos,len:v});pos+=v;
+  }
+}
+// Turn the note map into a time-ordered list of notation pieces (notes with
+// ties where one value can't express the length, plus automatic rests).
+function pvBuildPieces(stepsPerLine){
+  const tot=tSteps(),NS=gStr().length,evs=new Map();
+  for(let si=0;si<NS;si++)for(let s=0;s<tot;s++){const n=notes[nk(si,s)];if(n){if(!evs.has(s))evs.set(s,{step:s,items:[]});evs.get(s).items.push({si,note:n});}}
+  const steps=[...evs.keys()].sort((a,b)=>a-b),out=[];let cursor=0;
+  for(const s of steps){
+    const ev=evs.get(s);
+    if(s-cursor>0.74)pvRests(cursor,s,out);
+    let len=0,trip=false;
+    ev.items.forEach(it=>{len=Math.max(len,dispS(it.note));if(it.note.trip||isTripDur(it.note.d))trip=true;});
+    len=Math.min(len,tot-s);if(len<=0)continue;
+    const mine=[];let pos=s,rem=len;
+    while(rem>0.74){const bEnd=(Math.floor(pos/SPB)+1)*SPB,seg=Math.min(rem,bEnd-pos);
+      pvSplitLen(seg,trip).forEach(v=>{mine.push({kind:'n',start:pos,len:v,ev});pos+=v;});rem-=seg;}
+    mine.forEach((p,i)=>{p.tieIn=i>0;p.tieOut=i<mine.length-1;out.push(p);});
+    cursor=Math.max(cursor,s+len);
+  }
+  if(tot-cursor>0.74)pvRests(cursor,tot,out);
+  out.sort((a,b)=>a.start-b.start);
+  const beat=SPB/tSig;let prev=null,grp=null;
+  out.forEach(p=>{
+    p.spec=PV_SPEC[p.len]||{k:4};p.line=Math.floor((p.start+1e-6)/stepsPerLine);
+    const bm=p.kind==='n'&&p.spec.k>=3;
+    if(!bm){grp=null;prev=p;return;}
+    const key=Math.floor((p.start+1e-6)/beat);
+    if(grp&&prev&&prev.gi===grp.id&&grp.key===key&&!!prev.spec.trip===!!p.spec.trip&&Math.abs(prev.start+prev.len-p.start)<1e-6&&grp.line===p.line){grp.ps.push(p);}
+    else{grp={id:(grp?grp.id:0)+1+Math.floor(p.start*7),key,line:p.line,ps:[p]};}
+    p.gi=grp.id;prev=p;
+  });
+  return out;
+}
+const PV_LET=[0,0,1,1,2,3,3,4,4,5,5,6],PV_ACC=[0,1,0,1,0,0,1,0,1,0,1,0];
+function pvStaffPos(m){const o=Math.floor(m/12)-1,pc=m%12;return{pos:(o*7+PV_LET[pc])-18,acc:PV_ACC[pc]};} // 0 = bottom line (G2)
+function pvWave(x0,x1,y){let d=`M${x0} ${y}`,up=true;for(let x=x0+2.5;x<=x1+0.1;x+=2.5){d+=` Q${x-1.25} ${y+(up?-2.2:2.2)} ${x} ${y}`;up=!up;}return d;}
+function pvRestGlyph(x,yc,k,wholeY,halfY){
+  const S='stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"';
+  if(k===0)return`<rect x="${x-4.5}" y="${wholeY}" width="9" height="3.4" fill="currentColor"/>`;
+  if(k===1)return`<rect x="${x-4.5}" y="${halfY-3.4}" width="9" height="3.4" fill="currentColor"/>`;
+  if(k===2)return`<path d="M${x-2} ${yc-9} L${x+2.5} ${yc-4} L${x-2} ${yc+0.5} L${x+2.5} ${yc+5.5} Q${x-3.5} ${yc+5} ${x-1.5} ${yc+10}" ${S}/>`;
+  const n=k>=4?2:1;let h=`<path d="M${x+3} ${yc-6} L${x-1.5} ${yc+(k>=4?10:8)}" ${S}/>`;
+  for(let i=0;i<n;i++){const cy=yc-3+i*4.5;h+=`<circle cx="${x-2.5}" cy="${cy}" r="1.9" fill="currentColor"/><path d="M${x-2.5} ${cy+0.8} Q${x+0.5} ${cy+0.8} ${x+3} ${cy-3}" ${S}/>`;}
+  return h;
+}
+function pvTie(x1,x2,y,dir){const m=(x1+x2)/2,d=dir*7;return`<path d="M${x1} ${y} Q${m} ${y+d} ${x2} ${y}" fill="none" stroke="currentColor" stroke-width="1.2"/>`;}
+
 function renderSvg(){
   const svg=document.getElementById('tabSvg');if(!svg)return;
-  const strs=gStr();const NS=strs.length;const CW=getCW();const tot=tSteps();
-  const stepsPerLine=svgBPL*SPB;               // internal steps per line
-  const SX=CW/TPS;                             // px per internal step (so a visible slot = CW)
-  const barW=SPB*SX;                           // px width of one bar (= VIS*CW)
-  const lineW=svgBPL*barW;                     // px width of one line
+  const strs=gStr(),NS=strs.length,CW=getCW(),tot=tSteps();
+  const L=pvLayout(),LP=L.LP,pat=L.pat;
+  const stepsPerLine=svgBPL*SPB,SX=CW/TPS,barW=SPB*SX;
   const nL=Math.max(1,Math.ceil(tot/stepsPerLine));
-  const LH=NS*SVG_SG+44;const W=SVG_LP+lineW+SVG_RP;const H=nL*LH+SVG_TP;
-  const lc='rgba(255,255,255,.1)',blc='rgba(255,255,255,.35)',lbc='rgba(255,255,255,.3)';
-  // x-coordinate (px) of an internal step, relative to the given line start
-  const sx=(stepInLine)=>SVG_LP+stepInLine*SX;
+  const LH=L.LH,W=LP+svgBPL*barW+SVG_RP,H=nL*LH+SVG_TP;
+  const sx=st=>LP+st*SX;
+  const NX=pat==='C'?12:7,fs=CW===10?9:12;
+  const wrap=document.getElementById('tabViewScroll');
+  if(wrap){wrap.classList.toggle('pv-light',pvTheme==='light');wrap.classList.toggle('pv-dark',pvTheme==='dark');}
+  const pieces=pat==='B'?[]:pvBuildPieces(stepsPerLine);
+  const tsLbl=tSig===4?['4','4']:tSig===3?['3','4']:['6','8'];
+  const numHW=s=>Math.max(3.5,String(s).length*fs*0.31+1.5);
   let h='';
   for(let line=0;line<nL;line++){
-    const ly=SVG_TP+line*LH;const sc=line*stepsPerLine;
-    for(let si=0;si<NS;si++){const sy=ly+si*SVG_SG+SVG_SG;h+=`<line x1="${SVG_LP}" y1="${sy}" x2="${SVG_LP+lineW}" y2="${sy}" stroke="${lc}" stroke-width="1"/>`;h+=`<text x="${SVG_LP-3}" y="${sy+4}" text-anchor="end" font-size="11" fill="${lbc}" font-family="monospace">${strs[si].n}</text>`;}
-    for(let bar=0;bar<=svgBPL;bar++){const bx=SVG_LP+bar*barW;h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${blc}" stroke-width="1.5"/>`;if(bar<svgBPL){const bn=line*svgBPL+bar+1;if(bn<=bars)h+=`<text class="bar-num" data-bar="${bn-1}" x="${bx+2}" y="${ly+SVG_SG-7}" font-size="9" fill="${lbc}" style="cursor:pointer">${bn}</text>`;}}
-    // Beat gridlines (every 12 steps = one quarter), skipping bar lines
-    for(let st=0;st<stepsPerLine;st+=SPB/tSig){const step=sc+st;if(step>=tot)break;if(st%SPB!==0){const bx=sx(st);h+=`<line x1="${bx}" y1="${ly+SVG_SG}" x2="${bx}" y2="${ly+NS*SVG_SG+SVG_SG}" stroke="${lc}" stroke-width=".6" stroke-dasharray="2,2"/>`;}}
-    // Draw continuations of notes that started in a PREVIOUS line and still sustain into this one
-    for(let si=0;si<NS;si++){
-      let contStep=null,contNote=null;
-      for(let s=Math.max(0,sc-96);s<sc;s++){
-        const n=notes[nk(si,s)];
-        if(n&&!n.ghost&&s+Math.ceil(dispS(n))>sc){contStep=s;contNote=n;}
-      }
-      if(contNote==null)continue;
-      const sy=ly+si*SVG_SG+SVG_SG;
-      const solidEndStep=contStep+contNote.d;
-      const fullEndStep=contStep+dispS(contNote);
-      const lineEndStep=sc+stepsPerLine;
-      const drawEnd=Math.min(fullEndStep,lineEndStep,tot);
-      if(drawEnd<=sc)continue;
-      const baseOpacity=contNote.stac?.18:.45;
-      const solidDrawEnd=Math.min(solidEndStep,drawEnd);
-      if(solidDrawEnd>sc){
-        const x1=sx(0),x2=sx(solidDrawEnd-sc);
-        h+=`<g class="svgn" data-owner="${si}-${contStep}"><line x1="${x1}" y1="${sy}" x2="${x2}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${baseOpacity}"/></g>`;
-      }
-      if(drawEnd>solidEndStep){
-        const dx1=sx(Math.max(0,solidEndStep-sc)),dx2=sx(drawEnd-sc);
-        h+=`<g class="svgn" data-owner="${si}-${contStep}"><line x1="${dx1}" y1="${sy}" x2="${dx2}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/></g>`;
-      }
-    }
+    const ly=SVG_TP+line*LH,sc=line*stepsPerLine;
+    const lineBars=Math.min(svgBPL,bars-line*svgBPL);if(lineBars<=0)continue;
+    const lineW=lineBars*barW,xEnd=LP+lineW;
+    const tY=si=>ly+L.t0+si*L.SG;
+    const tabTop=tY(0),tabBot=tY(NS-1);
+    const gaps=strs.map(()=>[]);
+    let tabH='',rhyH='';
+    // ── tab numbers (all patterns) ──
     for(let st=0;st<stepsPerLine;st++){
-      const step=sc+st;if(step>=tot)break;const cx=sx(st)+SX/2;
+      const step=sc+st;if(step>=tot)break;const cx=sx(st)+NX;
       for(let si=0;si<NS;si++){
         const note=notes[nk(si,step)];if(!note)continue;
-        const ig=!!note.ghost,ds=dispS(note),id=!!note.dot,ist=!!note.stac,iv=!!note.vib;
-        const sy=ly+si*SVG_SG+SVG_SG,r=CW===10?7:9;
-        h+=`<g class="svgn${isTripDur(note.d)?' trip':''}" id="svgn-${si}-${step}">`;
-        if(ig){h+=`<text x="${cx}" y="${sy+4}" text-anchor="middle" font-size="12" font-weight="500" fill="currentColor" font-family="monospace">×</text>`;}
-        else{
-          let fs=String(note.fret);
-          if(note.slide)fs+=note.slide.targets.map(t=>(t>note.fret?'/':'\\')+t).join('');
-          h+=`<rect x="${cx-r}" y="${sy-r}" width="${r*2}" height="${r*2}" rx="${r}" fill="currentColor"/>`;
-          const fsz=fs.length>4?(CW===10?5:7):fs.length>2?(CW===10?6:8):(CW===10?8:11);
-          h+=`<text x="${cx}" y="${sy+3}" text-anchor="middle" font-size="${fsz}" font-weight="500" fill="white" font-family="monospace">${fs}</text>`;
-          if(id)h+=`<text x="${cx+r+2}" y="${sy-r+2}" font-size="9" font-weight="700" fill="currentColor">.</text>`;
-          if(iv)h+=`<text x="${cx}" y="${sy-r-3}" text-anchor="middle" font-size="8" fill="currentColor">~</text>`;
-          if(ist)h+=`<text x="${cx}" y="${sy+r+8}" text-anchor="middle" font-size="8" fill="currentColor">·</text>`;
+        const sy=tY(si),ds=dispS(note);
+        let g=`<g class="svgn" id="svgn-${si}-${step}">`;
+        let label,hw;
+        if(note.ghost){label='×';hw=4.5;}else{label=String(note.fret);hw=numHW(label);}
+        g+=`<text x="${cx}" y="${sy+fs*0.36}" text-anchor="middle" font-size="${fs}" font-weight="500" fill="currentColor" font-family="monospace">${label}</text>`;
+        gaps[si].push([cx-hw-1,cx+hw+1]);
+        let endX=cx+hw;
+        if(note.slide&&!note.ghost){
+          let px=cx+hw,cur=note.fret;
+          note.slide.targets.forEach(t=>{
+            const up=t>cur,tl=String(t),thw=numHW(tl),sl=9;
+            g+=`<line x1="${px+1}" y1="${up?sy+4:sy-4}" x2="${px+1+sl}" y2="${up?sy-4:sy+4}" stroke="currentColor" stroke-width="1.2"/>`;
+            const tcx=px+1+sl+thw;
+            g+=`<text x="${tcx}" y="${sy+fs*0.36}" text-anchor="middle" font-size="${fs}" font-weight="500" fill="currentColor" font-family="monospace">${tl}</text>`;
+            gaps[si].push([tcx-thw-1,tcx+thw+1]);px=tcx+thw;cur=t;
+          });
+          endX=px;
+        }
+        if(note.vib&&!note.ghost)g+=`<path d="${pvWave(cx-hw,Math.max(cx+hw,Math.min(sx(st+ds)-3,cx+34)),sy-fs*0.9-3)}" fill="none" stroke="currentColor" stroke-width="1"/>`;
+        if(note.stac)g+=`<circle cx="${cx}" cy="${sy+fs*0.9+2}" r="1.3" fill="currentColor"/>`;
+        if(pat==='B'){
+          if(note.dot)g+=`<circle cx="${endX+3}" cy="${sy+3}" r="1.3" fill="currentColor"/>`;
           if(ds>TPS){
-            const bTrueEnd=step+note.d-sc,bE=Math.min(bTrueEnd,stepsPerLine),bClip=bTrueEnd>stepsPerLine;
-            const bX=bClip?sx(bE):sx(bE)+SX/2-r;
-            if(bX>cx+r+1)h+=`<line x1="${cx+r+1}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity="${ist?.18:.45}"/>`;
-            if(id){
-              const dTrueEnd=step+ds-sc,dE=Math.min(dTrueEnd,stepsPerLine),dClip=dTrueEnd>stepsPerLine;
-              const dX=dClip?sx(dE):sx(dE)+SX/2-r;
-              if(dX>bX)h+=`<line x1="${bX}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="${CW===10?2:3}" stroke-linecap="round" opacity=".18"/>`;
-            }
+            const x0=endX+(note.dot?7:3),tE=st+note.d,clip=tE>stepsPerLine;
+            const bX=clip?sx(stepsPerLine):sx(Math.min(tE,stepsPerLine))+NX-6;
+            if(bX>x0)g+=`<line x1="${x0}" y1="${sy}" x2="${bX}" y2="${sy}" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="${note.stac?.2:.5}"/>`;
+            if(note.dot){const dE=st+ds,dc=dE>stepsPerLine,dX=dc?sx(stepsPerLine):sx(Math.min(dE,stepsPerLine))+NX-6;
+              if(dX>Math.max(bX,x0))g+=`<line x1="${Math.max(bX,x0)}" y1="${sy}" x2="${dX}" y2="${sy}" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".2"/>`;}
           }
         }
-        h+=`</g>`;
+        tabH+=g+'</g>';
       }
     }
+    // B: continuation of long notes that began on an earlier line
+    if(pat==='B'){
+      for(let si=0;si<NS;si++){
+        let cs=null,cn=null;
+        for(let s=Math.max(0,sc-96);s<sc;s++){const n=notes[nk(si,s)];if(n&&!n.ghost&&s+Math.ceil(dispS(n))>sc){cs=s;cn=n;}}
+        if(cn==null)continue;
+        const sy=tY(si),sEnd=cs+cn.d,fEnd=cs+dispS(cn),dEnd=Math.min(fEnd,sc+stepsPerLine,tot);
+        if(dEnd<=sc)continue;
+        const sDraw=Math.min(sEnd,dEnd);
+        if(sDraw>sc)tabH+=`<g class="svgn" data-owner="${si}-${cs}"><line x1="${sx(0)}" y1="${sy}" x2="${sx(sDraw-sc)}" y2="${sy}" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="${cn.stac?.2:.5}"/></g>`;
+        if(dEnd>sEnd)tabH+=`<g class="svgn" data-owner="${si}-${cs}"><line x1="${sx(Math.max(0,sEnd-sc))}" y1="${sy}" x2="${sx(dEnd-sc)}" y2="${sy}" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".2"/></g>`;
+      }
+    }
+    // ── rhythm marks (A: under tab, C: on staff) ──
+    if(pat!=='B'){
+      const lp=pieces.filter(p=>p.line===line);
+      const sTop=ly+L.staffTop,sBot=sTop+32;
+      const posY=pos=>sBot-pos*4;
+      // geometry per piece
+      lp.forEach(p=>{
+        p.x=sx(p.start-sc)+NX;
+        if(p.kind==='r'&&p.len===48)p.x=sx(Math.floor((p.start+1e-6)/SPB)*SPB-sc)+barW/2;
+        if(p.kind==='n'){
+          p.heads=p.ev.items.map(it=>{
+            const m=strs[it.si].m+(it.note.ghost?0:(it.note.fret||0))+12,sp=pvStaffPos(m);
+            return{pos:sp.pos,acc:sp.acc,ghost:!!it.note.ghost,y:posY(sp.pos)};
+          });
+          const ps=p.heads.map(x=>x.pos);p.pmin=Math.min(...ps);p.pmax=Math.max(...ps);
+          p.dir=((p.pmin+p.pmax)/2>=4)?1:-1; // 1 = stem down, -1 = stem up
+        }
+      });
+      const groups={};
+      lp.forEach(p=>{if(p.gi!=null){(groups[p.gi]=groups[p.gi]||[]).push(p);}});
+      Object.values(groups).forEach(ps=>{
+        if(pat==='C'&&ps.length>1){const avg=ps.reduce((a,p)=>a+(p.pmin+p.pmax)/2,0)/ps.length;ps.forEach(p=>p.dir=avg>=4?1:-1);}
+      });
+      // stem extents
+      const yA=ly+L.tabLast+9,yAe=yA+16; // pattern A stems
+      lp.forEach(p=>{
+        if(p.kind!=='n')return;
+        if(pat==='A'){p.sy0=yA;p.sy1=yAe;p.dir=1;}
+        else{
+          const top=posY(p.pmax),bot=posY(p.pmin);
+          if(p.dir===-1){p.sy0=bot;p.sy1=top-27;}else{p.sy0=top;p.sy1=bot+27;}
+        }
+      });
+      Object.values(groups).forEach(ps=>{
+        if(ps.length<2||pat!=='C')return;
+        const d=ps[0].dir;
+        const e=d===-1?Math.min(...ps.map(p=>p.sy1)):Math.max(...ps.map(p=>p.sy1));
+        ps.forEach(p=>{p.sy1=e;});
+      });
+      // group owner id for highlight
+      const own=p=>p.ev?`${p.ev.items[0].si}-${p.ev.step}`:'';
+      const stemX=p=>pat==='A'?p.x:(p.dir===-1?p.x+4.4:p.x-4.4);
+      const flagDir=p=>p.dir===-1?1:-1; // flag/beam extend toward the heads
+      lp.forEach((p,i)=>{
+        const sp=p.spec,k=sp.k;
+        if(p.kind==='r'){
+          let yc,wy,hy;
+          if(pat==='A'){yc=ly+L.tabLast+19;wy=yc;hy=yc;}
+          else{yc=sTop+16;wy=sTop+8;hy=sTop+16;}
+          let g=pvRestGlyph(p.x,yc,Math.min(k,5),wy,hy);
+          if(pat==='A'&&(k===0||k===1))g+=`<line x1="${p.x-7}" y1="${yc}" x2="${p.x+7}" y2="${yc}" stroke="currentColor" stroke-width=".8"/>`;
+          rhyH+=`<g>${g}</g>`;
+          return;
+        }
+        let g=`<g class="svgn" data-owner="${own(p)}">`;
+        const hollow=k<=1;
+        if(pat==='C'){
+          p.heads.forEach(hd=>{
+            // ledger lines
+            for(let q=-2;q>=hd.pos;q-=2)g+=`<line x1="${p.x-7}" y1="${posY(q)}" x2="${p.x+7}" y2="${posY(q)}" stroke="currentColor" stroke-width="1.1"/>`;
+            for(let q=10;q<=hd.pos;q+=2)g+=`<line x1="${p.x-7}" y1="${posY(q)}" x2="${p.x+7}" y2="${posY(q)}" stroke="currentColor" stroke-width="1.1"/>`;
+            if(hd.ghost){g+=`<path d="M${p.x-3.6} ${hd.y-3.6} L${p.x+3.6} ${hd.y+3.6} M${p.x+3.6} ${hd.y-3.6} L${p.x-3.6} ${hd.y+3.6}" stroke="currentColor" stroke-width="1.6"/>`;}
+            else if(k===0)g+=`<ellipse cx="${p.x}" cy="${hd.y}" rx="5.3" ry="3.5" fill="none" stroke="currentColor" stroke-width="1.3"/>`;
+            else g+=`<ellipse cx="${p.x}" cy="${hd.y}" rx="4.7" ry="3.4" transform="rotate(-22 ${p.x} ${hd.y})" ${hollow?'fill="none" stroke="currentColor" stroke-width="1.3"':'fill="currentColor"'}/>`;
+            if(hd.acc&&!p.tieIn)g+=`<text x="${p.x-8.5}" y="${hd.y+3.8}" text-anchor="middle" font-size="11" fill="currentColor">♯</text>`;
+            if(sp.dot)g+=`<circle cx="${p.x+8.5}" cy="${hd.y-((hd.pos%2===0)?2:0)}" r="1.3" fill="currentColor"/>`;
+          });
+          if(!p.tieIn){const f=p.ev.items.find(it=>it.note.stac);if(f)g+=`<circle cx="${p.x}" cy="${(p.dir===-1?posY(p.pmin)+7.5:posY(p.pmax)-7.5)}" r="1.3" fill="currentColor"/>`;}
+        }else{
+          if(k===0)g+=`<circle cx="${p.x}" cy="${yA+4}" r="3.3" fill="none" stroke="currentColor" stroke-width="1.2"/>`;
+          if(k===1)g+=`<circle cx="${p.x}" cy="${yAe+3.5}" r="3" fill="none" stroke="currentColor" stroke-width="1.2"/>`;
+          if(sp.dot)g+=`<circle cx="${p.x+4.5}" cy="${(k===0?yA+4:yAe-3)}" r="1.3" fill="currentColor"/>`;
+        }
+        // stem
+        if(k>=1){const x=stemX(p);g+=`<line x1="${x}" y1="${p.sy0}" x2="${x}" y2="${p.sy1}" stroke="currentColor" stroke-width="1.3"/>`;}
+        // flags (unbeamed eighth or shorter)
+        const gp=p.gi!=null?groups[p.gi]:null;
+        if(k>=3&&(!gp||gp.length<2)){
+          const x=stemX(p),dy=flagDir(p),n=Math.min(k-2,3);
+          for(let f=0;f<n;f++){const y0=p.sy1+dy*f*3.6;g+=`<path d="M${x} ${y0} Q${x+(p.dir===-1?1:1)*3} ${y0+dy*3} ${x+5.5} ${y0+dy*7.5}" fill="none" stroke="currentColor" stroke-width="1.5"/>`;}
+        }
+        rhyH+=g+'</g>';
+      });
+      // beams
+      Object.values(groups).forEach(ps=>{
+        if(ps.length<2)return;
+        const dy=flagDir(ps[0]),by=ps[0].sy1;
+        for(let lv=1;lv<=3;lv++){
+          let run=[];const flush=()=>{
+            if(!run.length)return;
+            const y=by+dy*(lv-1)*3.6;
+            if(run.length>=2){const x0=stemX(run[0]),x1=stemX(run[run.length-1]);rhyH+=`<line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="currentColor" stroke-width="2.3"/>`;}
+            else{const q=run[0],idx=ps.indexOf(q),x=stemX(q),left=idx===ps.length-1;rhyH+=`<line x1="${x}" y1="${y}" x2="${left?x-5:x+5}" y2="${y}" stroke="currentColor" stroke-width="2.3"/>`;}
+            run=[];};
+          ps.forEach(p=>{if(p.spec.k-2>=lv)run.push(p);else flush();});flush();
+        }
+      });
+      // ties
+      lp.forEach(p=>{
+        if(p.kind!=='n')return;
+        let tp=p;if(p.tieIn){for(let q=lp.indexOf(p)-1;q>=0;q--){if(lp[q].kind==='n'&&lp[q].ev===p.ev&&!lp[q].tieIn){tp=lp[q];break;}}}
+        const dir=pat==='A'?1:(tp.dir===-1?1:-1);       // arc bulges away from the stem
+        const yAt=hd=>pat==='A'?yAe+(p.spec.k===1?8:4):hd.y+(dir===1?5:-5);
+        if(p.tieIn){
+          const prev=lp[lp.indexOf(p)-1];
+          const hs=pat==='A'?[null]:p.heads;
+          hs.forEach(hd=>{const y=pat==='A'?yAe+4:yAt(hd);
+            const x1=(prev&&prev.kind==='n'&&prev.ev===p.ev)?prev.x+(pat==='A'?0:5):LP+2;
+            rhyH+=pvTie(x1,p.x-(pat==='A'?0:5),y,dir);});
+        }else if(p.tieOut&&p.start+p.len>=(line+1)*stepsPerLine-1e-6){
+          const hs=pat==='A'?[null]:p.heads;
+          hs.forEach(hd=>{const y=pat==='A'?yAe+4:yAt(hd);rhyH+=pvTie(p.x+(pat==='A'?0:5),xEnd,y,dir);});
+        }
+      });
+      // triplet brackets / numbers
+      const tg={};
+      lp.forEach(p=>{if(p.spec.trip){const key=`${p.len}:${Math.floor((p.start+1e-6)/(3*p.len))}`;(tg[key]=tg[key]||[]).push(p);}});
+      Object.values(tg).forEach(ps=>{
+        if(ps.length<2)return;
+        const x0=ps[0].x,x1=ps[ps.length-1].x,xm=(x0+x1)/2;
+        const allBeamed=ps.every(p=>p.kind==='n'&&p.spec.k>=3);
+        const down=pat==='A'?true:(ps[0].kind==='n'?ps[0].dir===-1:true);
+        let y;
+        if(pat==='A')y=yAe+(allBeamed?12:11);
+        else{const ref=ps.filter(p=>p.kind==='n');
+          y=ref.length?(down?Math.min(...ref.map(p=>p.sy1))-6:Math.max(...ref.map(p=>p.sy1))+12):sTop-8;}
+        if(!allBeamed){const yb=pat==='A'?y-4:(down?y+3:y-9);
+          rhyH+=`<path d="M${x0} ${yb+(down?3:-3)} L${x0} ${yb} L${xm-5} ${yb} M${xm+5} ${yb} L${x1} ${yb} L${x1} ${yb+(down?3:-3)}" fill="none" stroke="currentColor" stroke-width="1"/>`;}
+        rhyH+=`<text x="${xm}" y="${y}" text-anchor="middle" font-size="10" font-style="italic" fill="currentColor">3</text>`;
+      });
+    }
+    // ── frame: lines, barlines, labels ──
+    const S1=`stroke="currentColor"`;
+    h+=`<g ${S1} stroke-opacity=".55" stroke-width="1">`;
+    for(let si=0;si<NS;si++){
+      const y=tY(si),gp=gaps[si].sort((a,b)=>a[0]-b[0]);let x=LP;
+      for(const[g0,g1] of gp){if(g0>x)h+=`<line x1="${x}" y1="${y}" x2="${Math.min(g0,xEnd)}" y2="${y}"/>`;x=Math.max(x,g1);}
+      if(x<xEnd)h+=`<line x1="${x}" y1="${y}" x2="${xEnd}" y2="${y}"/>`;
+    }
+    h+=`</g>`;
+    if(pat==='C'){
+      const sTop=ly+L.staffTop;
+      h+=`<g ${S1} stroke-opacity=".8" stroke-width="1">`;
+      for(let i=0;i<5;i++)h+=`<line x1="${LP}" y1="${sTop+i*8}" x2="${xEnd}" y2="${sTop+i*8}"/>`;
+      h+=`</g>`;
+      // bass clef
+      const cx0=8,cy0=sTop;
+      h+=`<g fill="currentColor"><circle cx="${cx0+3}" cy="${cy0+8}" r="3.2"/><circle cx="${cx0+17}" cy="${cy0+5.5}" r="1.7"/><circle cx="${cx0+17}" cy="${cy0+11.5}" r="1.7"/></g>`;
+      h+=`<path d="M${cx0+2} ${cy0+7} C${cx0+2} ${cy0-1} ${cx0+14} ${cy0} ${cx0+14} ${cy0+10} C${cx0+14} ${cy0+19} ${cx0+7} ${cy0+26} ${cx0} ${cy0+31}" fill="none" ${S1} stroke-width="2.4" stroke-linecap="round"/>`;
+      if(line===0){h+=`<g fill="currentColor" font-family="serif" font-weight="700" font-size="17" text-anchor="middle"><text x="${LP-11}" y="${sTop+15}">${tsLbl[0]}</text><text x="${LP-11}" y="${sTop+31}">${tsLbl[1]}</text></g>`;}
+      // TAB label
+      const tm=(tabTop+tabBot)/2;
+      h+=`<g fill="currentColor" font-family="sans-serif" font-weight="700" font-size="13" text-anchor="middle"><text x="14" y="${tm-9}">T</text><text x="14" y="${tm+5}">A</text><text x="14" y="${tm+19}">B</text></g>`;
+    }else{
+      strs.forEach((s,si)=>{h+=`<text x="${LP-3}" y="${tY(si)+4}" text-anchor="end" font-size="11" fill="currentColor" fill-opacity=".6" font-family="monospace">${s.n}</text>`;});
+    }
+    // bar lines + bar numbers
+    for(let b=0;b<=lineBars;b++){
+      const bx=LP+b*barW;
+      const last=(line*svgBPL+b===bars);
+      const op=b===0&&pat!=='C'?'.55':'.8';
+      const seg=(y0,y1)=>{
+        if(last&&b>0){return`<line x1="${bx-3.5}" y1="${y0}" x2="${bx-3.5}" y2="${y1}" ${S1} stroke-width="1.2"/><line x1="${bx}" y1="${y0}" x2="${bx}" y2="${y1}" ${S1} stroke-width="3.2"/>`;}
+        return`<line x1="${bx}" y1="${y0}" x2="${bx}" y2="${y1}" ${S1} stroke-opacity="${op}" stroke-width="1.3"/>`;};
+      h+=seg(tabTop,tabBot);
+      if(pat==='C'){h+=seg(ly+L.staffTop,ly+L.staffTop+32);if(b===0)h+=`<line x1="${LP}" y1="${ly+L.staffTop}" x2="${LP}" y2="${tabBot}" ${S1} stroke-width="1.3"/>`;}
+      if(b<lineBars){const bn=line*svgBPL+b+1;if(bn<=bars)h+=`<text class="bar-num" data-bar="${bn-1}" x="${bx+3}" y="${ly+L.barNumY}" font-size="9" fill="currentColor" fill-opacity=".55" style="cursor:pointer">${bn}</text>`;}
+    }
+    if(pat==='B'){
+      for(let st=0;st<stepsPerLine;st+=SPB/tSig){const step=sc+st;if(step>=tot)break;if(st%SPB!==0&&st<lineW/SX){const bx=sx(st);h+=`<line x1="${bx}" y1="${tabTop}" x2="${bx}" y2="${tabBot}" ${S1} stroke-opacity=".25" stroke-width=".6" stroke-dasharray="2,2"/>`;}}
+    }
+    h+=rhyH+tabH;
   }
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('width',W);svg.setAttribute('height',H);svg.innerHTML=h;
   phLine=null;phLastScrollLine=-1; // SVG innerHTML replaced; cached playhead line is stale
-  const wrap=document.getElementById('tabViewScroll');if(wrap){const tH=LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=nL>2?'auto':'hidden';}
+  if(wrap){const tH=LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=nL>2?'auto':'hidden';}
 }
+
+function pvSetOpts(){
+  ['A','B','C'].forEach(k=>{const b=document.getElementById('pv'+k);if(b)b.classList.toggle('active',pvPat===k);});
+  const l=document.getElementById('pvLight'),d=document.getElementById('pvDark');
+  if(l)l.classList.toggle('active',pvTheme==='light');if(d)d.classList.toggle('active',pvTheme==='dark');
+}
+function pvChange(pat,theme){
+  if(pat)pvPat=pat;if(theme)pvTheme=theme;
+  try{localStorage.setItem('bte_pvPat',pvPat);localStorage.setItem('bte_pvTheme',pvTheme);}catch(e){}
+  pvSetOpts();renderSvg();
+  if(playing||ppos>0)updateSvgPH(ppos);
+}
+['A','B','C'].forEach(k=>document.getElementById('pv'+k).addEventListener('click',()=>pvChange(k,null)));
+document.getElementById('pvLight').addEventListener('click',()=>pvChange(null,'light'));
+document.getElementById('pvDark').addEventListener('click',()=>pvChange(null,'dark'));
+pvSetOpts();
 
 buildCanvas();renderSvg();
 setTimeout(()=>{updatePbar();updatePbarMarks();},100);
