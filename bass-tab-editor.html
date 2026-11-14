@@ -309,6 +309,14 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   <button class="btn sm" id="pvLight">白背景</button>
   <button class="btn sm" id="pvDark">黒背景</button>
 </div>
+<div class="pv-opts">
+  <span class="lbl">A4保存</span>
+  <select id="pvExpFmt"><option value="pdf">PDF</option><option value="png">画像(PNG)</option></select>
+  <span class="lbl">1ページの行数</span>
+  <input type="number" class="loop-inp" id="pvExpRows" min="1" max="40" style="width:56px">
+  <button class="btn sm" id="pvExpBtn">保存</button>
+  <span class="lbl" id="pvExpMsg"></span>
+</div>
 <div class="tab-view-outer"><div class="tab-view-scroll" id="tabViewScroll"><svg id="tabSvg" class="tab-svg"></svg></div></div>
 <div class="divider"><span>保存・読み込み</span><hr></div>
 <div class="io-panel">
@@ -1957,23 +1965,24 @@ function pvRestGlyph(x,yc,k,wholeY,halfY){
 }
 function pvTie(x1,x2,y,dir){const m=(x1+x2)/2,d=dir*7;return`<path d="M${x1} ${y} Q${m} ${y+d} ${x2} ${y}" fill="none" stroke="currentColor" stroke-width="1.2"/>`;}
 
-function renderSvg(){
-  const svg=document.getElementById('tabSvg');if(!svg)return;
+function pvNLines(){return Math.max(1,Math.ceil(tSteps()/(svgBPL*SPB)));}
+// Builds the SVG body for systems [l0,l1). Used by the on-screen preview (all
+// systems) and by the A4 export (a page worth of systems at a time).
+function pvBuild(l0,l1){
   const strs=gStr(),NS=strs.length,CW=getCW(),tot=tSteps();
   const L=pvLayout(),LP=L.LP,pat=L.pat;
   const stepsPerLine=svgBPL*SPB,SX=CW/TPS,barW=SPB*SX;
-  const nL=Math.max(1,Math.ceil(tot/stepsPerLine));
-  const LH=L.LH,W=LP+svgBPL*barW+SVG_RP,H=nL*LH+SVG_TP;
+  const nL=pvNLines();
+  if(l0==null)l0=0;if(l1==null)l1=nL;
+  const LH=L.LH,W=LP+svgBPL*barW+SVG_RP,H=(l1-l0)*LH+SVG_TP;
   const sx=st=>LP+st*SX;
   const NX=pat==='C'?12:7,fs=CW===10?9:12;
-  const wrap=document.getElementById('tabViewScroll');
-  if(wrap){wrap.classList.toggle('pv-light',pvTheme==='light');wrap.classList.toggle('pv-dark',pvTheme==='dark');}
   const pieces=pat==='B'?[]:pvBuildPieces(stepsPerLine);
   const tsLbl=tSig===4?['4','4']:tSig===3?['3','4']:['6','8'];
   const numHW=s=>Math.max(3.5,String(s).length*fs*0.31+1.5);
   let h='';
-  for(let line=0;line<nL;line++){
-    const ly=SVG_TP+line*LH,sc=line*stepsPerLine;
+  for(let line=l0;line<l1;line++){
+    const ly=SVG_TP+(line-l0)*LH,sc=line*stepsPerLine;
     const lineBars=Math.min(svgBPL,bars-line*svgBPL);if(lineBars<=0)continue;
     const lineW=lineBars*barW,xEnd=LP+lineW;
     const tY=si=>ly+L.t0+si*L.SG;
@@ -2078,10 +2087,10 @@ function renderSvg(){
         const sp=p.spec,k=sp.k;
         if(p.kind==='r'){
           let yc,wy,hy;
-          if(pat==='A'){yc=ly+L.tabLast+19;wy=yc;hy=yc;}
-          else{yc=sTop+16;wy=sTop+8;hy=sTop+16;}
+          if(pat==='A'){yc=ly+L.tabLast+19;hy=yc;const m=Math.floor((NS-1)/2);wy=(tY(m)+tY(m+1))/2-1.7;}
+          else{yc=sTop+16;wy=sTop+12-1.7;hy=sTop+16;}
           let g=pvRestGlyph(p.x,yc,Math.min(k,5),wy,hy);
-          if(pat==='A'&&(k===0||k===1))g+=`<line x1="${p.x-7}" y1="${yc}" x2="${p.x+7}" y2="${yc}" stroke="currentColor" stroke-width=".8"/>`;
+          if(pat==='A'&&k===1)g+=`<line x1="${p.x-7}" y1="${yc}" x2="${p.x+7}" y2="${yc}" stroke="currentColor" stroke-width=".8"/>`;
           rhyH+=`<g>${g}</g>`;
           return;
         }
@@ -2204,9 +2213,16 @@ function renderSvg(){
     }
     h+=rhyH+tabH;
   }
-  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('width',W);svg.setAttribute('height',H);svg.innerHTML=h;
+  return{h,W,H,LH,nL};
+}
+function renderSvg(){
+  const svg=document.getElementById('tabSvg');if(!svg)return;
+  const wrap=document.getElementById('tabViewScroll');
+  if(wrap){wrap.classList.toggle('pv-light',pvTheme==='light');wrap.classList.toggle('pv-dark',pvTheme==='dark');}
+  const r=pvBuild(0,pvNLines());
+  svg.setAttribute('viewBox',`0 0 ${r.W} ${r.H}`);svg.setAttribute('width',r.W);svg.setAttribute('height',r.H);svg.innerHTML=r.h;
   phLine=null;phLastScrollLine=-1; // SVG innerHTML replaced; cached playhead line is stale
-  if(wrap){const tH=LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=nL>2?'auto':'hidden';}
+  if(wrap){const tH=r.LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=r.nL>2?'auto':'hidden';}
 }
 
 function pvSetOpts(){
@@ -2217,13 +2233,95 @@ function pvSetOpts(){
 function pvChange(pat,theme){
   if(pat)pvPat=pat;if(theme)pvTheme=theme;
   try{localStorage.setItem('bte_pvPat',pvPat);localStorage.setItem('bte_pvTheme',pvTheme);}catch(e){}
-  pvSetOpts();renderSvg();
+  pvSetOpts();if(typeof pvSyncRowsInput==='function')pvSyncRowsInput();renderSvg();
   if(playing||ppos>0)updateSvgPH(ppos);
 }
 ['A','B','C'].forEach(k=>document.getElementById('pv'+k).addEventListener('click',()=>pvChange(k,null)));
 document.getElementById('pvLight').addEventListener('click',()=>pvChange(null,'light'));
 document.getElementById('pvDark').addEventListener('click',()=>pvChange(null,'dark'));
 pvSetOpts();
+
+// ── A4 export (PDF / PNG) ─────────────────────────────────────────
+// Renders the preview exactly as currently shown (same notation pattern and
+// bars-per-line), always on a white background, N systems per page.
+let pvRows={A:10,B:10,C:5};
+try{const _r=JSON.parse(localStorage.getItem('bte_pvRows')||'null');if(_r)['A','B','C'].forEach(k=>{if(_r[k]>=1&&_r[k]<=40)pvRows[k]=_r[k];});}catch(e){}
+function pvSyncRowsInput(){const i=document.getElementById('pvExpRows');if(i)i.value=pvRows[pvPat];}
+function pvDownload(blob,name){
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+}
+function pvB64ToBytes(dataUrl){const b=atob(dataUrl.split(',')[1]);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+function pvMakePdf(pages){ // pages: [{bytes,w,h}] full-page JPEGs
+  const enc=new TextEncoder(),parts=[],offs=[];let len=0;
+  const push=b=>{const u=typeof b==='string'?enc.encode(b):b;parts.push(u);len+=u.length;};
+  const obj=(n,fn)=>{offs[n]=len;push(n+' 0 obj\n');fn();push('\nendobj\n');};
+  const N=pages.length,PWpt=595.28,PHpt=841.89;
+  push('%PDF-1.4\n');
+  obj(1,()=>push('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2,()=>push('<< /Type /Pages /Kids ['+pages.map((_,i)=>(3+3*i)+' 0 R').join(' ')+'] /Count '+N+' >>'));
+  pages.forEach((j,i)=>{
+    const pg=3+3*i,ct=4+3*i,im=5+3*i,cs='q '+PWpt+' 0 0 '+PHpt+' 0 0 cm /Im0 Do Q';
+    obj(pg,()=>push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+PWpt+' '+PHpt+'] /Resources << /XObject << /Im0 '+im+' 0 R >> >> /Contents '+ct+' 0 R >>'));
+    obj(ct,()=>push('<< /Length '+cs.length+' >>\nstream\n'+cs+'\nendstream'));
+    obj(im,()=>{push('<< /Type /XObject /Subtype /Image /Width '+j.w+' /Height '+j.h+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+j.bytes.length+' >>\nstream\n');push(j.bytes);push('\nendstream');});
+  });
+  const xref=len,total=3*N+3;
+  push('xref\n0 '+total+'\n0000000000 65535 f \n');
+  for(let n=1;n<total;n++)push(String(offs[n]).padStart(10,'0')+' 00000 n \n');
+  push('trailer\n<< /Size '+total+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF');
+  return new Blob(parts,{type:'application/pdf'});
+}
+async function pvExport(){
+  const msg=document.getElementById('pvExpMsg'),btn=document.getElementById('pvExpBtn');
+  const fmt=document.getElementById('pvExpFmt').value;
+  let rows=parseInt(document.getElementById('pvExpRows').value);if(isNaN(rows)||rows<1)rows=pvRows[pvPat];rows=Math.min(40,Math.max(1,rows));
+  btn.disabled=true;msg.textContent='作成中…';
+  try{
+    const PWpx=1654,PHpx=2339,M=100,HEAD=130,FOOT=90;   // A4 portrait at 200dpi
+    const nL=pvNLines(),pages=Math.ceil(nL/rows);
+    const probe=pvBuild(0,1),usableW=PWpx-2*M,usableH=PHpx-M-HEAD-FOOT;
+    const scale=Math.min(usableW/probe.W,usableH/(rows*probe.LH+SVG_TP));
+    const titleRaw=(document.getElementById('saveTitleInp')||{}).value||'';
+    const title=titleRaw.trim()||'ベース タブ譜';
+    const sub='♩ = '+tempo+'　'+(tSig===4?'4/4':tSig===3?'3/4':'6/8');
+    const outs=[];
+    for(let pg=0;pg<pages;pg++){
+      const l0=pg*rows,l1=Math.min(nL,l0+rows),r=pvBuild(l0,l1);
+      const w=r.W*scale,h=r.H*scale;
+      const svgStr='<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 '+r.W+' '+r.H+'" style="color:#111">'+r.h+'</svg>';
+      const url=URL.createObjectURL(new Blob([svgStr],{type:'image/svg+xml;charset=utf-8'}));
+      const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('svg load'));im.src=url;});
+      const cv=document.createElement('canvas');cv.width=PWpx;cv.height=PHpx;
+      const cx=cv.getContext('2d');cx.fillStyle='#ffffff';cx.fillRect(0,0,PWpx,PHpx);
+      cx.drawImage(img,M+(usableW-w)/2,M+HEAD,w,h);URL.revokeObjectURL(url);
+      cx.fillStyle='#111';cx.textBaseline='alphabetic';
+      cx.font="bold 46px 'Hiragino Sans','Noto Sans JP','Yu Gothic',sans-serif";cx.textAlign='left';
+      if(pg===0){cx.fillText(title,M,M+44);cx.fillStyle='#555';cx.font="26px 'Hiragino Sans','Noto Sans JP','Yu Gothic',sans-serif";cx.fillText(sub,M,M+88);}
+      cx.fillStyle='#777';cx.font="24px sans-serif";cx.textAlign='center';cx.fillText((pg+1)+' / '+pages,PWpx/2,PHpx-M/2);
+      outs.push(cv);
+    }
+    const base=title.replace(/[\\/:*?"<>|]/g,'_');
+    if(fmt==='pdf'){
+      const jp=outs.map(cv=>({bytes:pvB64ToBytes(cv.toDataURL('image/jpeg',0.92)),w:cv.width,h:cv.height}));
+      pvDownload(pvMakePdf(jp),base+'.pdf');
+    }else{
+      for(let i=0;i<outs.length;i++){
+        const blob=await new Promise(res=>outs[i].toBlob(res,'image/png'));
+        pvDownload(blob,outs.length>1?base+'_'+(i+1)+'.png':base+'.png');
+        if(i<outs.length-1)await new Promise(r=>setTimeout(r,500));
+      }
+    }
+    msg.textContent='保存しました（'+pages+'ページ）';
+  }catch(e){console.error(e);msg.textContent='保存に失敗しました';}
+  btn.disabled=false;setTimeout(()=>{if(msg.textContent.startsWith('保存しました'))msg.textContent='';},4000);
+}
+document.getElementById('pvExpBtn').addEventListener('click',pvExport);
+document.getElementById('pvExpRows').addEventListener('change',function(){
+  let v=parseInt(this.value);if(isNaN(v)||v<1)v=pvRows[pvPat];v=Math.min(40,Math.max(1,v));
+  pvRows[pvPat]=v;this.value=v;try{localStorage.setItem('bte_pvRows',JSON.stringify(pvRows));}catch(e){}
+});
+pvSyncRowsInput();
 
 buildCanvas();renderSvg();
 setTimeout(()=>{updatePbar();updatePbarMarks();},100);
