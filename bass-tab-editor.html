@@ -329,6 +329,18 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
     <span id="ioMsg"></span>
   </div>
 </div>
+<div class="settings-toggle collapsed" id="aiToggle" style="margin-top:10px"><span class="settings-toggle-arrow">▼</span> 🖼 画像からコードを作る（AIを利用）</div>
+<div class="io-panel collapsed" id="aiPanel" style="display:none">
+  <div style="font-size:12px;line-height:1.8;color:var(--text2)">
+    <b>手順</b><br>
+    ① 下のボタンで「AIへの依頼文」をコピーします。<br>
+    ② ClaudeやChatGPTなど、画像を読めるAIに、タブ譜の画像と一緒に依頼文を貼り付けて送ります。<br>
+    ③ 返ってきたコードを、上の欄に貼り付けて「↓ インポート」を押します。<br>
+    ④ 再生して耳で確認し、違う音やリズムを修正します。<br>
+    <span style="color:var(--text3,#888)">※AIの読み取りは完璧ではありません（特にリズム・手書き・写真）。必ず確認してください。著作権のある楽譜は個人の練習用にご利用ください。</span>
+  </div>
+  <div class="io-row"><button class="btn sm primary" id="aiCopyBtn">AIへの依頼文をコピー</button><span id="aiMsg" class="io-ok"></span></div>
+</div>
 <div class="divider"><span>クラウド保存</span><hr></div>
 <div class="io-panel" id="cloudPanel">
   <div class="io-panel-title" id="cloudHint">ログインすると、タブ譜をクラウドに保存できます。</div>
@@ -714,7 +726,8 @@ function expData(){
   return btoa(unescape(encodeURIComponent(JSON.stringify({v:14,ts:tSig,tp:tempo,ns:nStr,b:bars,n:ns}))));
 }
 function impData(code){
-  const j=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
+  const t=code.trim();
+  const j=(t[0]==='{')?JSON.parse(t):JSON.parse(decodeURIComponent(escape(atob(t))));
   if(!j||!j.v)throw new Error('invalid');
   tSig=j.ts||4;tempo=j.tp||80;nStr=j.ns||4;bars=j.b||1;
   document.getElementById('timeSig').value=tSig;document.getElementById('stringSel').value=nStr;
@@ -745,9 +758,135 @@ function impData(code){
   stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
 }
 document.getElementById('exportBtn').addEventListener('click',()=>{document.getElementById('ioTa').value=expData();showMsg('エクスポートしました',false);});
-document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
+document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}if(/(^|\n)\s*`*\s*(bte\s*($|\n)|tempo\s*[=:：]|strings\s*[=:：]|time\s*[=:：])/i.test(c)){const r=bteImport(c);showMsg(r.msg,!r.ok,r.ok?4000:9000);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
 document.getElementById('copyBtn').addEventListener('click',()=>{const ta=document.getElementById('ioTa');if(!ta.value){showMsg('先にエクスポートしてください',true);return;}navigator.clipboard.writeText(ta.value).then(()=>showMsg('コピーしました',false)).catch(()=>{ta.select();document.execCommand('copy');showMsg('コピーしました',false);});});
-function showMsg(msg,isErr){const el=document.getElementById('ioMsg');el.textContent=msg;el.className=isErr?'io-err':'io-ok';setTimeout(()=>el.textContent='',4000);}
+function showMsg(msg,isErr,ms){const el=document.getElementById('ioMsg');el.textContent=msg;el.className=isErr?'io-err':'io-ok';clearTimeout(showMsg._t);showMsg._t=setTimeout(()=>el.textContent='',ms||4000);}
+// ── Plain-text ("BTE形式") import, designed so an AI can write it from a tab image ──
+// Header lines: tempo=, time=, strings=, bars=.  Note lines:  bar pos string fret len [opts]
+// pos is 0-based in 16th-note units within the bar (decimals allowed for triplets).
+const BTE_BASE={'1':48,'2':24,'4':12,'8':6,'16':3},BTE_TRIP={'2':16,'4':8,'8':4,'16':2};
+function bteParseLen(tok){
+  const parts=tok.split('+');let total=0,single=null,allTrip=true;
+  for(const p of parts){
+    const m=p.match(/^(1|2|4|8|16)(\.|t)?$/);if(!m)return null;
+    let st;
+    if(m[2]==='t'){st=BTE_TRIP[m[1]];if(!st)return null;}
+    else{st=BTE_BASE[m[1]];allTrip=false;if(m[2]==='.')st*=1.5;}
+    total+=st;if(parts.length===1)single={base:m[2]==='t'?BTE_TRIP[m[1]]:BTE_BASE[m[1]],dot:m[2]==='.',trip:m[2]==='t'};
+  }
+  if(single)return single;
+  return{base:Math.round(total),dot:false,trip:allTrip,multi:true};
+}
+function bteParse(text){
+  const errs=[],lines=text.replace(/\r/g,'').split('\n');
+  const head={tempo:null,ts:4,ns:4,bars:null},raw=[];
+  lines.forEach((ln,i)=>{
+    if(/^\s*```/.test(ln))return;
+    const s=ln.replace(/[#＃].*$/,'').replace(/[`]/g,'').trim();if(!s||/^bte$/i.test(s))return;
+    const kv=s.match(/^(tempo|time|strings|bars)\s*[=:：]\s*(.+)$/i);
+    if(kv){
+      const k=kv[1].toLowerCase(),v=kv[2].trim();
+      if(k==='tempo'){const t=parseInt(v);if(t>=40&&t<=240)head.tempo=t;else errs.push(`${i+1}行目: tempoは40〜240`);}
+      else if(k==='time'){const m={'4/4':4,'3/4':3,'6/8':6}[v.replace(/\s/g,'')];if(m)head.ts=m;else errs.push(`${i+1}行目: timeは 4/4・3/4・6/8`);}
+      else if(k==='strings'){const n=parseInt(v);if(n>=4&&n<=6)head.ns=n;else errs.push(`${i+1}行目: stringsは4・5・6`);}
+      else{const n=parseInt(v);if(n>=1&&n<=64)head.bars=n;else errs.push(`${i+1}行目: barsは1〜64`);}
+      return;
+    }
+    raw.push({ln:i+1,f:s.split(/[\s,，]+/)});
+  });
+  const strs=STRS[head.ns],out=[];let maxBar=1;
+  raw.forEach(({ln,f})=>{
+    if(f.length<5){errs.push(`${ln}行目: 「小節 位置 弦 フレット 長さ」の5項目が必要です`);return;}
+    const bar=parseInt(f[0]),pos=parseFloat(f[1]),sname=f[2].toUpperCase(),fretS=f[3].toLowerCase(),lenTok=f[4];
+    if(!(bar>=1&&bar<=64)){errs.push(`${ln}行目: 小節が不正`);return;}
+    if(!(pos>=0&&pos<16)){errs.push(`${ln}行目: 位置は0以上16未満`);return;}
+    const si=strs.findIndex(x=>x.n===sname);if(si<0){errs.push(`${ln}行目: 弦「${f[2]}」は${head.ns}弦ベースにありません`);return;}
+    const ghost=(fretS==='x'),fret=ghost?null:parseInt(fretS);
+    if(!ghost&&!(fret>=0&&fret<=24)){errs.push(`${ln}行目: フレットは0〜24かx`);return;}
+    const L=bteParseLen(lenTok);if(!L){errs.push(`${ln}行目: 長さ「${lenTok}」が不正（例: 4 8 4. 8t 4+16）`);return;}
+    const step=(bar-1)*SPB+Math.round(pos*TPS);
+    const note={fret,d:L.base,ghost,dot:L.dot,stac:false,vib:false,si,slide:null,fine:false,trip:L.trip};
+    note.fine=L.trip||(step%TPS!==0)||(L.base%TPS!==0);
+    f.slice(5).forEach(o=>{
+      const ol=o.toLowerCase();
+      if(ol==='v')note.vib=true;else if(ol==='s')note.stac=true;
+      else if(/^sl:/.test(ol)){const ts=ol.slice(3).split('/').map(x=>parseInt(x)).filter(x=>x>=0&&x<=24);if(ts.length&&!ghost)note._sl=ts;}
+    });
+    maxBar=Math.max(maxBar,bar);out.push({step,note,si,ln});
+  });
+  const bars=head.bars||maxBar;
+  out.forEach(o=>{if(o.step>=bars*SPB)errs.push(`${o.ln}行目: 小節がbarsを超えています`);});
+  return{errs,head,bars,out};
+}
+function bteApply(r){
+  tSig=r.head.ts;nStr=r.head.ns;bars=r.bars;if(r.head.tempo)tempo=r.head.tempo;
+  document.getElementById('timeSig').value=tSig;document.getElementById('stringSel').value=nStr;setTempo(tempo);
+  notes={};let trimmed=0;
+  const bySi={};r.out.forEach(o=>{(bySi[o.si]=bySi[o.si]||[]).push(o);});
+  Object.values(bySi).forEach(arr=>{
+    arr.sort((a,b)=>a.step-b.step);
+    arr.forEach((o,i)=>{
+      const nx=arr[i+1];
+      if(nx&&nx.step===o.step){trimmed++;return;}                       // same string & time: keep the later one
+      const len=dispS(o.note);
+      if(nx&&o.step+Math.ceil(len)>nx.step){const gap=nx.step-o.step;o.note.d=gap;o.note.dot=false;o.note.trip=false;o.note.fine=true;trimmed++;}
+      const tot=bars*SPB;if(o.step+o.note.d>tot){o.note.d=tot-o.step;o.note.dot=false;o.note.fine=true;}
+      if(o.note._sl){const f0=o.note._sl;delete o.note._sl;const c0=slCreate(f0[0],gmxFor(o.note));let s={targets:c0.targets,durations:c0.durations};for(let k=1;k<f0.length;k++)s=slAddTarget(s,f0[k],gmxFor(o.note)).slide;o.note.slide=s;}
+      delete o.note._sl;notes[nk(o.si,o.step)]=o.note;
+    });
+  });
+  stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();updatePbarMarks();
+  return{count:Object.keys(notes).length,trimmed};
+}
+const BTE_PROMPT=`添付したベースのタブ譜の画像を読み取り、下記の「BTE形式」のテキストだけを出力してください（説明文は不要。コードブロック1つで出力）。
+
+【BTE形式】
+BTE
+tempo=100
+time=4/4
+strings=4
+bars=2
+1 0 E 3 4
+1 4 E 5 4
+1 8 A 5 8
+1 10 A 7 8. v
+
+■ 1行目からのヘッダー
+- tempo: 画像に書いてあればそのBPM。なければ100
+- time: 4/4（4/4以外は4/4に直して近似する）
+- strings: 4弦なら4、5弦なら5、6弦なら6
+- bars: 全体の小節数
+
+■ 音符は1音符につき1行:  小節 位置 弦 フレット 長さ [オプション]
+- 小節: 1から数える
+- 位置: その小節の頭を0とし、16分音符を1とする数え方。4分音符の頭は 0,4,8,12。8分の裏は 2,6,10,14。16分の裏は 1,3,5,7…。三連符は小数（1拍目の八分三連符は 0 / 1.33 / 2.67、2拍目は 4 / 5.33 / 6.67）
+- 弦: 上の線から順に G D A E（5弦は最後にB、6弦は先頭にCを足して C G D A E B）。タブ譜の線に対応させる
+- フレット: 数字。ゴーストノート（×）は x
+- 長さ: 全音符=1 二分=2 四分=4 八分=8 十六分=16。付点は 4. のように「.」を付ける。三連符は 8t（八分三連）・4t（四分三連）・16t のように「t」を付ける。タイでつながる音や、1つの音価で書けない長さは 4+16（四分+十六分）のように「+」で足す
+- オプション（任意・空白区切り）: v=ビブラート  s=スタッカート  sl:12=12フレットへスライド（例 sl:12/14 は連続スライド）
+- 休符は書かない（音のない部分は何も書かない）
+- ハンマリング・プリング・ベンドなど対応していない奏法は、フレットの数字だけ書く
+
+■ 注意
+- 画像に五線譜やリズム記号（符幹・旗・連桁）がある場合はそれを最優先にリズムを読み取る。数字だけのタブ譜の場合は、数字の間隔から自然なリズムを推測する
+- 読み取れない・自信がない箇所は、最も自然なものを選んで出力する
+- 繰り返し記号（リピート）は展開して全ての小節を書く`;
+document.getElementById('aiToggle').addEventListener('click',function(){
+  const p=document.getElementById('aiPanel');const open=p.style.display==='none';
+  p.style.display=open?'block':'none';this.classList.toggle('collapsed',!open);
+});
+document.getElementById('aiCopyBtn').addEventListener('click',()=>{
+  const done=()=>{const m=document.getElementById('aiMsg');m.textContent='コピーしました';setTimeout(()=>m.textContent='',3000);};
+  navigator.clipboard.writeText(BTE_PROMPT).then(done).catch(()=>{const ta=document.createElement('textarea');ta.value=BTE_PROMPT;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();done();});
+});
+function bteImport(text){
+  const r=bteParse(text);
+  if(r.errs.length)return{ok:false,msg:r.errs.slice(0,4).join(' / ')+(r.errs.length>4?` …他${r.errs.length-4}件`:'')};
+  if(!r.out.length)return{ok:false,msg:'音符の行が見つかりません'};
+  const res=bteApply(r);
+  return{ok:true,msg:`BTE形式で読み込みました（${res.count}音符${res.trimmed?`・重なり${res.trimmed}件を調整`:''}）`};
+}
+
 
 // ── Cloud account & save (Supabase) ─────────────────────────────────
 const SUPABASE_URL='https://xmqeomwreakrfxzbgcop.supabase.co';
