@@ -357,6 +357,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
 </div>
 
+<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-E ／ BTE形式の長さ＝16分音符の個数</div>
 <script>
 // ── Constants ──────────────────────────────────────────────────────
 // ── Time resolution ────────────────────────────────────────────────
@@ -758,24 +759,22 @@ function impData(code){
   stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
 }
 document.getElementById('exportBtn').addEventListener('click',()=>{document.getElementById('ioTa').value=expData();showMsg('エクスポートしました',false);});
-document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}if(/(^|\n)\s*`*\s*(bte\s*($|\n)|tempo\s*[=:：]|strings\s*[=:：]|time\s*[=:：])/i.test(c)){const r=bteImport(c);showMsg(r.msg,!r.ok,r.ok?4000:9000);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
+document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}if(/(^|\n)\s*`*\s*(bte\s*($|\n)|tempo\s*[=:：]|strings\s*[=:：]|time\s*[=:：])/i.test(c)){const r=bteImport(c);showMsg(r.msg,!r.ok,(r.ok&&!r.warn)?4000:14000);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
 document.getElementById('copyBtn').addEventListener('click',()=>{const ta=document.getElementById('ioTa');if(!ta.value){showMsg('先にエクスポートしてください',true);return;}navigator.clipboard.writeText(ta.value).then(()=>showMsg('コピーしました',false)).catch(()=>{ta.select();document.execCommand('copy');showMsg('コピーしました',false);});});
 function showMsg(msg,isErr,ms){const el=document.getElementById('ioMsg');el.textContent=msg;el.className=isErr?'io-err':'io-ok';clearTimeout(showMsg._t);showMsg._t=setTimeout(()=>el.textContent='',ms||4000);}
 // ── Plain-text ("BTE形式") import, designed so an AI can write it from a tab image ──
 // Header lines: tempo=, time=, strings=, bars=.  Note lines:  bar pos string fret len [opts]
 // pos is 0-based in 16th-note units within the bar (decimals allowed for triplets).
-const BTE_BASE={'1':48,'2':24,'4':12,'8':6,'16':3},BTE_TRIP={'2':16,'4':8,'8':4,'16':2};
+// Length is written in 16th-note units (same unit as position): 16th=1, 8th=2, dotted 8th=3,
+// quarter=4, half=8, whole=16; triplets use decimals (8th-triplet=1.33, 16th-triplet=0.67, quarter-triplet=2.67).
 function bteParseLen(tok){
-  const parts=tok.split('+');let total=0,single=null,allTrip=true;
-  for(const p of parts){
-    const m=p.match(/^(1|2|4|8|16)(\.|t)?$/);if(!m)return null;
-    let st;
-    if(m[2]==='t'){st=BTE_TRIP[m[1]];if(!st)return null;}
-    else{st=BTE_BASE[m[1]];allTrip=false;if(m[2]==='.')st*=1.5;}
-    total+=st;if(parts.length===1)single={base:m[2]==='t'?BTE_TRIP[m[1]]:BTE_BASE[m[1]],dot:m[2]==='.',trip:m[2]==='t'};
-  }
-  if(single)return single;
-  return{base:Math.round(total),dot:false,trip:allTrip,multi:true};
+  const parts=tok.split('+');let total=0;
+  for(const p of parts){if(!/^\d+(\.\d+)?$/.test(p))return null;const v=parseFloat(p);if(!(v>0))return null;total+=v*TPS;}
+  const near=(a,b)=>Math.abs(a-b)<0.2;
+  for(const s of [3,6,12,24,48])if(near(total,s))return{base:s,dot:false,trip:false};
+  for(const [s,bs] of [[4.5,3],[9,6],[18,12],[36,24]])if(near(total,s))return{base:bs,dot:true,trip:false};
+  for(const s of [2,4,8,16])if(near(total,s))return{base:s,dot:false,trip:true};
+  const d=Math.round(total);return d>=1?{base:d,dot:false,trip:false}:null;
 }
 function bteParse(text){
   const errs=[],lines=text.replace(/\r/g,'').split('\n');
@@ -795,15 +794,19 @@ function bteParse(text){
     raw.push({ln:i+1,f:s.split(/[\s,，]+/)});
   });
   const strs=STRS[head.ns],out=[];let maxBar=1;
-  raw.forEach(({ln,f})=>{
+  let lastName=null;
+  raw.forEach(row=>{
+    const ln=row.ln;let f=row.f;
+    if(f.length===4&&/^x$/i.test(f[2])&&lastName)f=[f[0],f[1],lastName,'x',f[3]];   // ghost line with the string omitted
     if(f.length<5){errs.push(`${ln}行目: 「小節 位置 弦 フレット 長さ」の5項目が必要です`);return;}
     const bar=parseInt(f[0]),pos=parseFloat(f[1]),sname=f[2].toUpperCase(),fretS=f[3].toLowerCase(),lenTok=f[4];
     if(!(bar>=1&&bar<=64)){errs.push(`${ln}行目: 小節が不正`);return;}
     if(!(pos>=0&&pos<16)){errs.push(`${ln}行目: 位置は0以上16未満`);return;}
     const si=strs.findIndex(x=>x.n===sname);if(si<0){errs.push(`${ln}行目: 弦「${f[2]}」は${head.ns}弦ベースにありません`);return;}
+    lastName=sname;
     const ghost=(fretS==='x'),fret=ghost?null:parseInt(fretS);
     if(!ghost&&!(fret>=0&&fret<=24)){errs.push(`${ln}行目: フレットは0〜24かx`);return;}
-    const L=bteParseLen(lenTok);if(!L){errs.push(`${ln}行目: 長さ「${lenTok}」が不正（例: 4 8 4. 8t 4+16）`);return;}
+    const L=bteParseLen(lenTok);if(!L){errs.push(`${ln}行目: 長さ「${lenTok}」が不正（16分音符の個数で書く。例: 4, 2, 3, 1.33, 4+1）`);return;}
     const step=(bar-1)*SPB+Math.round(pos*TPS);
     const note={fret,d:L.base,ghost,dot:L.dot,stac:false,vib:false,si,slide:null,fine:false,trip:L.trip};
     note.fine=L.trip||(step%TPS!==0)||(L.base%TPS!==0);
@@ -815,8 +818,8 @@ function bteParse(text){
     maxBar=Math.max(maxBar,bar);out.push({step,note,si,ln});
   });
   const bars=head.bars||maxBar;
-  out.forEach(o=>{if(o.step>=bars*SPB)errs.push(`${o.ln}行目: 小節がbarsを超えています`);});
-  return{errs,head,bars,out};
+  const ok=out.filter(o=>{if(o.step>=bars*SPB){errs.push(`${o.ln}行目: 小節がbarsを超えています`);return false;}return true;});
+  return{errs,head,bars,out:ok};
 }
 function bteApply(r){
   tSig=r.head.ts;nStr=r.head.ns;bars=r.bars;if(r.head.tempo)tempo=r.head.tempo;
@@ -848,8 +851,8 @@ strings=4
 bars=2
 1 0 E 3 4
 1 4 E 5 4
-1 8 A 5 8
-1 10 A 7 8. v
+1 8 A 5 2
+1 10 A 7 3 v
 
 ■ 1行目からのヘッダー
 - tempo: 画像に書いてあればそのBPM。なければ100
@@ -862,8 +865,9 @@ bars=2
 - 位置: その小節の頭を0とし、16分音符を1とする数え方。4分音符の頭は 0,4,8,12。8分の裏は 2,6,10,14。16分の裏は 1,3,5,7…。三連符は小数（1拍目の八分三連符は 0 / 1.33 / 2.67、2拍目は 4 / 5.33 / 6.67）
 - 弦: 上の線から順に G D A E（5弦は最後にB、6弦は先頭にCを足して C G D A E B）。タブ譜の線に対応させる
 - フレット: 数字。ゴーストノート（×）は x
-- 長さ: 全音符=1 二分=2 四分=4 八分=8 十六分=16。付点は 4. のように「.」を付ける。三連符は 8t（八分三連）・4t（四分三連）・16t のように「t」を付ける。タイでつながる音や、1つの音価で書けない長さは 4+16（四分+十六分）のように「+」で足す
+- 長さ: その音が続く長さを、位置と同じ「16分音符の個数」で書く。16分=1、8分=2、付点8分=3、4分=4、付点4分=6、2分=8、付点2分=12、全音符=16。三連符は小数で、八分三連=1.33、十六分三連=0.67、四分三連=2.67。タイでつながる音など1つの音価で書けない長さは 4+1 のように「+」で足す
 - オプション（任意・空白区切り）: v=ビブラート  s=スタッカート  sl:12=12フレットへスライド（例 sl:12/14 は連続スライド）
+- 各行は必ず「小節 位置 弦 フレット 長さ」の5項目を空白区切りで書く。ゴーストノートも弦を省略せず、フレットの場所に x と書く（例: 1 6 A x 1）
 - 休符は書かない（音のない部分は何も書かない）
 - ハンマリング・プリング・ベンドなど対応していない奏法は、フレットの数字だけ書く
 
@@ -881,10 +885,10 @@ document.getElementById('aiCopyBtn').addEventListener('click',()=>{
 });
 function bteImport(text){
   const r=bteParse(text);
-  if(r.errs.length)return{ok:false,msg:r.errs.slice(0,4).join(' / ')+(r.errs.length>4?` …他${r.errs.length-4}件`:'')};
-  if(!r.out.length)return{ok:false,msg:'音符の行が見つかりません'};
+  if(!r.out.length)return{ok:false,msg:r.errs.length?r.errs.slice(0,4).join(' / '):'音符の行が見つかりません'};
   const res=bteApply(r);
-  return{ok:true,msg:`BTE形式で読み込みました（${res.count}音符${res.trimmed?`・重なり${res.trimmed}件を調整`:''}）`};
+  const warn=r.errs.length?`　⚠ 読み飛ばし${r.errs.length}件: `+r.errs.slice(0,3).join(' / ')+(r.errs.length>3?' …':''):'';
+  return{ok:true,warn:!!r.errs.length,msg:`BTE形式で読み込みました（${res.count}音符${res.trimmed?`・重なり${res.trimmed}件を調整`:''}）${warn}`};
 }
 
 
