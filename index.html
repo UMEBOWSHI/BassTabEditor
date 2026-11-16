@@ -39,12 +39,19 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 .btn.primary:hover{background:var(--blue2)}
 .btn.sm{padding:3px 7px;font-size:11px}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff;font-weight:600}
+.btn.danger:hover{background:#a93226;border-color:#a93226}
 .btn.active,.btn.on-loop{background:var(--green);border-color:var(--green);color:#fff}
 .divider{display:flex;align-items:center;gap:8px;margin:12px 0 8px}
 .divider span{font-size:11px;color:var(--text3);white-space:nowrap}
 .divider hr{flex:1;border:none;border-top:1px solid var(--border)}
 .hint{font-size:11px;color:var(--text3);margin-bottom:8px}
 /* Tab grid */
+.tab-nav-wrap{display:flex;align-items:stretch;gap:6px;margin-bottom:10px}
+.tab-nav-wrap .tab-scroll{flex:1;min-width:0;margin-bottom:0}
+.tab-nav{flex:0 0 30px;display:flex;align-items:center;justify-content:center;font-size:14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text);cursor:pointer;padding:0;user-select:none}
+.tab-nav:hover:not(:disabled){background:var(--bg2);border-color:var(--text3)}
+.tab-nav:disabled{opacity:.28;cursor:default}
 .tab-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2);margin-bottom:10px}
 .tab-canvas-wrap{display:inline-block;min-width:100%}
 .tab-grid-wrap{display:flex}
@@ -249,7 +256,6 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
       <input type="range" id="volSl" min="0" max="100" value="25">
       <button class="btn" id="vp">＋</button>
       <span class="val"><span id="volV">25</span></span>
-      <button class="btn" id="clearBtn">🗑 クリア</button>
     </div>
   </div>
   <div class="settings-col">
@@ -277,6 +283,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
     <button class="btn sm" id="skipBarFwd">+1小節</button>
     <button class="btn sm" id="skip4Fwd">+4小節</button>
     <button class="btn sm" id="loopBtn">🔁 ループ OFF</button>
+    <button class="btn sm danger" id="clearBtn" style="margin-left:auto">🗑 クリア</button>
   </div>
   <div class="pbar-wrap" id="pbarWrap">
     <div class="pbar-fill" id="pbarFill"></div>
@@ -293,7 +300,11 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   </div>
 </div>
 <div class="hint">弦の線をクリックして音符を追加。再生バーをドラッグして位置移動。</div>
-<div class="tab-scroll"><div class="tab-canvas-wrap" id="tabCanvas"></div></div>
+<div class="tab-nav-wrap">
+  <button class="tab-nav" id="tabPrev" title="前のページ" aria-label="前のページ">◀</button>
+  <div class="tab-scroll"><div class="tab-canvas-wrap" id="tabCanvas"></div></div>
+  <button class="tab-nav" id="tabNext" title="次のページ" aria-label="次のページ">▶</button>
+</div>
 <div class="divider"><span>タブ譜プレビュー</span><hr>
   <button class="btn sm" id="bpl1">1小節表示</button>
   <button class="btn sm" id="bpl2">2小節表示</button>
@@ -357,7 +368,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
 </div>
 
-<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-E ／ BTE形式の長さ＝16分音符の個数</div>
+<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-F ／ BTE形式の長さ＝16分音符の個数</div>
 <script>
 // ── Constants ──────────────────────────────────────────────────────
 // ── Time resolution ────────────────────────────────────────────────
@@ -721,6 +732,11 @@ function unpackNote(o){
     fine:!!o.fn,trip:!!o.tr,
     slide:o.sl?{targets:o.sl.t,durations:o.sl.d}:null};
 }
+// Unsaved-changes guard: "saved" = cloud save / overwrite / loaded from cloud / code exported or imported.
+let savedSnap=null;
+function markSaved(){try{savedSnap=expData();}catch(e){}}
+function hasUnsaved(){if(!Object.keys(notes).length)return false;try{return expData()!==savedSnap;}catch(e){return true;}}
+window.addEventListener('beforeunload',e=>{if(hasUnsaved()){e.preventDefault();e.returnValue='';return '';}});
 function expData(){
   const ns={};Object.entries(notes).forEach(([k,v])=>ns[k]=packNote(v));
   // v14: internal resolution is 48 divisions/bar. Volume is a local preference — not saved.
@@ -758,8 +774,8 @@ function impData(code){
   });
   stopPlay();ppos=0;buildCanvas();renderSvg();updatePbar();
 }
-document.getElementById('exportBtn').addEventListener('click',()=>{document.getElementById('ioTa').value=expData();showMsg('エクスポートしました',false);});
-document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}if(/(^|\n)\s*`*\s*(bte\s*($|\n)|tempo\s*[=:：]|strings\s*[=:：]|time\s*[=:：])/i.test(c)){const r=bteImport(c);showMsg(r.msg,!r.ok,(r.ok&&!r.warn)?4000:14000);return;}try{impData(c);showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
+document.getElementById('exportBtn').addEventListener('click',()=>{document.getElementById('ioTa').value=expData();markSaved();showMsg('エクスポートしました',false);});
+document.getElementById('importBtn').addEventListener('click',()=>{const c=document.getElementById('ioTa').value.trim();if(!c){showMsg('コードを貼り付けてください',true);return;}if(/(^|\n)\s*`*\s*(bte\s*($|\n)|tempo\s*[=:：]|strings\s*[=:：]|time\s*[=:：])/i.test(c)){const r=bteImport(c);if(r.ok)markSaved();showMsg(r.msg,!r.ok,(r.ok&&!r.warn)?4000:14000);return;}try{impData(c);markSaved();showMsg('インポートしました',false);}catch(e){showMsg('コードが無効です（変更なし）',true);}});
 document.getElementById('copyBtn').addEventListener('click',()=>{const ta=document.getElementById('ioTa');if(!ta.value){showMsg('先にエクスポートしてください',true);return;}navigator.clipboard.writeText(ta.value).then(()=>showMsg('コピーしました',false)).catch(()=>{ta.select();document.execCommand('copy');showMsg('コピーしました',false);});});
 function showMsg(msg,isErr,ms){const el=document.getElementById('ioMsg');el.textContent=msg;el.className=isErr?'io-err':'io-ok';clearTimeout(showMsg._t);showMsg._t=setTimeout(()=>el.textContent='',ms||4000);}
 // ── Plain-text ("BTE形式") import, designed so an AI can write it from a tab image ──
@@ -969,7 +985,7 @@ async function cloudSave(){
   const code=expData();
   const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title,code});
   if(error){cloudMsg('保存に失敗しました',true);return;}
-  titleInp.value='';
+  titleInp.value='';markSaved();
   cloudMsg('保存しました',false);
   loadMyTabs();
 }
@@ -991,7 +1007,7 @@ async function loadMyTabs(){
     const acts=document.createElement('div');acts.className='mytab-acts';
     const openB=document.createElement('button');openB.className='btn sm';openB.textContent='開く';
     openB.addEventListener('click',()=>{
-      try{impData(row.code);showMsg('読み込みました',false);}catch(e){cloudMsg('読み込みに失敗しました（データが壊れている可能性があります）',true);}
+      try{impData(row.code);markSaved();showMsg('読み込みました',false);}catch(e){cloudMsg('読み込みに失敗しました（データが壊れている可能性があります）',true);}
     });
     const overB=document.createElement('button');overB.className='btn sm';overB.textContent='上書き保存';
     overB.title='今開いているタブ譜の内容で、このタブ譜を上書きします';
@@ -999,7 +1015,7 @@ async function loadMyTabs(){
       if(!confirm(`「${row.title}」を、今開いている内容で上書き保存します。よろしいですか？`))return;
       const code=expData();
       const{error}=await sbClient.from('tabs').update({code,updated_at:new Date().toISOString()}).eq('id',row.id);
-      if(error)cloudMsg('上書き保存に失敗しました',true);else{cloudMsg('上書き保存しました',false);loadMyTabs();}
+      if(error)cloudMsg('上書き保存に失敗しました',true);else{markSaved();cloudMsg('上書き保存しました',false);loadMyTabs();}
     });
     const dupB=document.createElement('button');dupB.className='btn sm';dupB.textContent='複製';
     dupB.addEventListener('click',async()=>{
@@ -1746,6 +1762,7 @@ document.getElementById('skipBarFwd').addEventListener('click',()=>skipBars(+1))
 document.getElementById('skip4Back').addEventListener('click',()=>skipBars(-4));
 document.getElementById('skip4Fwd').addEventListener('click',()=>skipBars(+4));
 document.getElementById('clearBtn').addEventListener('click',()=>{
+  if(!window.confirm('入力した内容をすべてクリアします。よろしいですか？\n（保存していない内容は元に戻せません）'))return;
   stopPlay();notes={};ppos=0;bars=1;
   setSpeed(1); // reset playback speed to 1x
   if(loopOn){ // turn loop off
@@ -1997,6 +2014,17 @@ function scrollPreviewToBar(b){
   gStr().forEach((_,si)=>{for(let s=s0;s<e0;s++){const el=document.getElementById('svgn-'+si+'-'+s);if(el){el.classList.add('flash');flashed.push(el);}}});
   setTimeout(()=>flashed.forEach(el=>el.classList.remove('flash')),700);
 }
+// ◀ ▶ buttons beside the note-input area: move one "page" (= one visible width) at a time.
+(function(){
+  const sc=document.querySelector('.tab-scroll'),pv=document.getElementById('tabPrev'),nx=document.getElementById('tabNext');
+  if(!sc||!pv||!nx)return;
+  function upd(){pv.disabled=sc.scrollLeft<=1;nx.disabled=sc.scrollLeft+sc.clientWidth>=sc.scrollWidth-1;}
+  function page(dir){const w=Math.max(120,sc.clientWidth-48);sc.scrollBy({left:dir*w,behavior:'smooth'});}
+  pv.addEventListener('click',()=>page(-1));nx.addEventListener('click',()=>page(1));
+  sc.addEventListener('scroll',upd,{passive:true});window.addEventListener('resize',upd);
+  if(window.ResizeObserver){const ro=new ResizeObserver(upd);ro.observe(sc);ro.observe(document.getElementById('tabCanvas'));}
+  setTimeout(upd,0);
+})();
 // Scroll the note-input area horizontally so the given bar is visible.
 function scrollInputToBar(b){
   const sc=document.querySelector('.tab-scroll');if(!sc)return;
