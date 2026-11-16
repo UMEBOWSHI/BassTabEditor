@@ -47,12 +47,11 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .divider hr{flex:1;border:none;border-top:1px solid var(--border)}
 .hint{font-size:11px;color:var(--text3);margin-bottom:8px}
 /* Tab grid */
-.tab-nav-wrap{display:flex;align-items:stretch;gap:6px;margin-bottom:10px}
-.tab-nav-wrap .tab-scroll{flex:1;min-width:0;margin-bottom:0}
-.tab-nav{flex:0 0 30px;display:flex;align-items:center;justify-content:center;font-size:14px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text);cursor:pointer;padding:0;user-select:none}
+.tab-nav-row{display:flex;gap:8px;margin-bottom:10px}
+.tab-nav{flex:1;height:36px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;border:1px solid var(--border2);border-radius:8px;background:var(--bg3);color:var(--text);cursor:pointer;padding:0;user-select:none}
 .tab-nav:hover:not(:disabled){background:var(--bg2);border-color:var(--text3)}
 .tab-nav:disabled{opacity:.28;cursor:default}
-.tab-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2);margin-bottom:10px}
+.tab-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2);margin-bottom:6px}
 .tab-canvas-wrap{display:inline-block;min-width:100%}
 .tab-grid-wrap{display:flex}
 .string-labels{display:flex;flex-direction:column;border-right:1px solid var(--border);flex-shrink:0}
@@ -300,10 +299,10 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   </div>
 </div>
 <div class="hint">弦の線をクリックして音符を追加。再生バーをドラッグして位置移動。</div>
-<div class="tab-nav-wrap">
-  <button class="tab-nav" id="tabPrev" title="前のページ" aria-label="前のページ">◀</button>
-  <div class="tab-scroll"><div class="tab-canvas-wrap" id="tabCanvas"></div></div>
-  <button class="tab-nav" id="tabNext" title="次のページ" aria-label="次のページ">▶</button>
+<div class="tab-scroll"><div class="tab-canvas-wrap" id="tabCanvas"></div></div>
+<div class="tab-nav-row">
+  <button class="tab-nav" id="tabPrev" title="前の小節へ移動" aria-label="前の小節へ移動">◀ 前の小節</button>
+  <button class="tab-nav" id="tabNext" title="次の小節へ移動" aria-label="次の小節へ移動">次の小節 ▶</button>
 </div>
 <div class="divider"><span>タブ譜プレビュー</span><hr>
   <button class="btn sm" id="bpl1">1小節表示</button>
@@ -368,7 +367,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
 </div>
 
-<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-F ／ BTE形式の長さ＝16分音符の個数</div>
+<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-G ／ BTE形式の長さ＝16分音符の個数</div>
 <script>
 // ── Constants ──────────────────────────────────────────────────────
 // ── Time resolution ────────────────────────────────────────────────
@@ -2014,13 +2013,36 @@ function scrollPreviewToBar(b){
   gStr().forEach((_,si)=>{for(let s=s0;s<e0;s++){const el=document.getElementById('svgn-'+si+'-'+s);if(el){el.classList.add('flash');flashed.push(el);}}});
   setTimeout(()=>flashed.forEach(el=>el.classList.remove('flash')),700);
 }
-// ◀ ▶ buttons beside the note-input area: move one "page" (= one visible width) at a time.
+// Where (scrollLeft) the note-input area must be so that bar b starts at the area's left edge.
+// Measured from the real DOM (bar width includes borders and differs per device/zoom), clamped
+// to the scrollable range. A bar that fits is then fully visible; if the area is narrower than a
+// bar, its left edge is still at the left edge, as requested.
+let inputNavTarget=null,inputNavTs=0;
+function inputBarLeft(b){
+  const sc=document.querySelector('.tab-scroll'),el=document.querySelectorAll('#tabCanvas .bar-block')[b];
+  if(!sc||!el)return 0;
+  const left=el.getBoundingClientRect().left-sc.getBoundingClientRect().left+sc.scrollLeft-sc.clientLeft;
+  const max=Math.max(0,sc.scrollWidth-sc.clientWidth);
+  return Math.max(0,Math.min(max,b===0?0:Math.round(left)));
+}
+function goInputBar(b){
+  const sc=document.querySelector('.tab-scroll');if(!sc)return;
+  const t=inputBarLeft(b);inputNavTarget=t;inputNavTs=Date.now();
+  sc.scrollTo({left:t,behavior:'smooth'});
+}
+// ◀ ▶ buttons under the note-input area: move to the previous / next bar (same position as
+// clicking a bar number in the preview).
 (function(){
   const sc=document.querySelector('.tab-scroll'),pv=document.getElementById('tabPrev'),nx=document.getElementById('tabNext');
   if(!sc||!pv||!nx)return;
   function upd(){pv.disabled=sc.scrollLeft<=1;nx.disabled=sc.scrollLeft+sc.clientWidth>=sc.scrollWidth-1;}
-  function page(dir){const w=Math.max(120,sc.clientWidth-48);sc.scrollBy({left:dir*w,behavior:'smooth'});}
-  pv.addEventListener('click',()=>page(-1));nx.addEventListener('click',()=>page(1));
+  function cur(){return(inputNavTarget!=null&&Date.now()-inputNavTs<700)?inputNavTarget:sc.scrollLeft;}
+  function step(dir){
+    const c=cur(),n=document.querySelectorAll('#tabCanvas .bar-block').length;
+    if(dir>0){for(let b=0;b<n;b++){if(inputBarLeft(b)>c+2){goInputBar(b);return;}}}
+    else{for(let b=n-1;b>=0;b--){if(inputBarLeft(b)<c-2){goInputBar(b);return;}}}
+  }
+  pv.addEventListener('click',()=>step(-1));nx.addEventListener('click',()=>step(1));
   sc.addEventListener('scroll',upd,{passive:true});window.addEventListener('resize',upd);
   if(window.ResizeObserver){const ro=new ResizeObserver(upd);ro.observe(sc);ro.observe(document.getElementById('tabCanvas'));}
   setTimeout(upd,0);
@@ -2028,8 +2050,7 @@ function scrollPreviewToBar(b){
 // Scroll the note-input area horizontally so the given bar is visible.
 function scrollInputToBar(b){
   const sc=document.querySelector('.tab-scroll');if(!sc)return;
-  const barPx=VIS*SW;
-  sc.scrollTo({left:Math.max(0,b*barPx-8),behavior:'smooth'});
+  goInputBar(b);
   // Feedback flash on the input-area note blocks of this bar
   const s0=b*SPB,e0=s0+SPB;
   const flashed=[];
