@@ -6,7 +6,6 @@
 <meta name="google-site-verification" content="zrvaRkCMaoIkopVidZuH9JteueUaKaNOmAluN2LMt9w" />
 <title>Bass Tab Editor</title>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8413396585955977" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -220,9 +219,9 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="topbar">
   <h1>🎸 Bass Tab Editor</h1>
   <div id="acctArea" style="display:flex;gap:8px;align-items:center;margin-right:10px">
-    <span class="lbl" id="acctStatus">未ログイン</span>
-    <button class="btn sm" id="loginBtn">ログイン</button>
-    <button class="btn sm" id="logoutBtn" style="display:none">ログアウト</button>
+    <span class="lbl" id="acctStatus">Googleドライブ：未接続</span>
+    <button class="btn sm" id="loginBtn">Googleドライブに接続</button>
+    <button class="btn sm" id="logoutBtn" style="display:none">接続を解除</button>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
     <span class="lbl">弦数</span>
@@ -351,13 +350,14 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   </div>
   <div class="io-row"><button class="btn sm primary" id="aiCopyBtn">AIへの依頼文をコピー</button><span id="aiMsg" class="io-ok"></span></div>
 </div>
-<div class="divider"><span>クラウド保存</span><hr></div>
+<div class="divider"><span>Googleドライブ保存</span><hr></div>
 <div class="io-panel" id="cloudPanel">
-  <div class="io-panel-title" id="cloudHint">ログインすると、タブ譜をクラウドに保存できます。</div>
+  <div class="io-panel-title" id="cloudHint"></div>
   <div id="cloudLoggedInArea" style="display:none">
+    <div class="io-row" style="margin-top:0;margin-bottom:8px;font-size:12px;color:var(--text2)">保存先フォルダ：<b id="gdFolderName" style="color:var(--text)"></b> <button class="btn sm" id="gdPickBtn">保存先を変更</button></div>
     <div class="io-row" style="margin-top:0">
       <input type="text" id="saveTitleInp" placeholder="タブ譜のタイトル" style="flex:1;min-width:140px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:5px;padding:6px 9px;font-size:13px">
-      <button class="btn sm primary" id="cloudSaveBtn">☁ 保存</button>
+      <button class="btn sm primary" id="cloudSaveBtn">ドライブに保存</button>
       <span id="cloudMsg"></span>
     </div>
     <div class="divider" style="margin:12px 0 8px"><span>マイタブ譜</span><hr></div>
@@ -367,7 +367,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
 </div>
 
-<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-G ／ BTE形式の長さ＝16分音符の個数 ／ <a href="privacy.html" style="color:inherit">プライバシーポリシー</a></div>
+<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-I（Googleドライブ保存） ／ BTE形式の長さ＝16分音符の個数 ／ <a href="privacy.html" style="color:inherit">プライバシーポリシー</a></div>
 <script>
 // ── Constants ──────────────────────────────────────────────────────
 // ── Time resolution ────────────────────────────────────────────────
@@ -736,11 +736,12 @@ let savedSnap=null;
 function markSaved(){try{savedSnap=expData();}catch(e){}}
 function hasUnsaved(){if(!Object.keys(notes).length)return false;try{return expData()!==savedSnap;}catch(e){return true;}}
 window.addEventListener('beforeunload',e=>{if(hasUnsaved()){e.preventDefault();e.returnValue='';return '';}});
-function expData(){
+function expJson(){
   const ns={};Object.entries(notes).forEach(([k,v])=>ns[k]=packNote(v));
   // v14: internal resolution is 48 divisions/bar. Volume is a local preference — not saved.
-  return btoa(unescape(encodeURIComponent(JSON.stringify({v:14,ts:tSig,tp:tempo,ns:nStr,b:bars,n:ns}))));
+  return JSON.stringify({v:14,ts:tSig,tp:tempo,ns:nStr,b:bars,n:ns});
 }
+function expData(){return btoa(unescape(encodeURIComponent(expJson())));}
 function impData(code){
   const t=code.trim();
   const j=(t[0]==='{')?JSON.parse(t):JSON.parse(decodeURIComponent(escape(atob(t))));
@@ -907,138 +908,179 @@ function bteImport(text){
 }
 
 
-// ── Cloud account & save (Supabase) ─────────────────────────────────
-const SUPABASE_URL='https://xmqeomwreakrfxzbgcop.supabase.co';
-const SUPABASE_KEY='sb_publishable_aMNheXOvR7XCRP-ACT5AFg_8TzKQnVc';
-// Named sbClient (not "supabase") to avoid colliding with the global `supabase`
-// object that the CDN script attaches to window.
-const sbClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-
-function cloudMsg(msg,isErr){const el=document.getElementById('cloudMsg');if(!el)return;el.textContent=msg;el.style.color=isErr?'var(--red)':'var(--green)';el.style.fontSize='11px';setTimeout(()=>{el.textContent='';},4000);}
-
-// Always redirect back to a clean URL (no leftover query/hash from a
-// previous OAuth round-trip). Using window.location.href directly can
-// carry stale auth params/fragments into the next login attempt and
-// cause it to silently fail.
-function cleanAppUrl(){return window.location.origin+window.location.pathname;}
-
-async function refreshAuthUI(){
-  const{data:{session}}=await sbClient.auth.getSession();
-  const statusEl=document.getElementById('acctStatus');
-  const loginBtn=document.getElementById('loginBtn');
-  const logoutBtn=document.getElementById('logoutBtn');
-  const hint=document.getElementById('cloudHint');
-  const loggedInArea=document.getElementById('cloudLoggedInArea');
-  if(session&&session.user){
-    const email=session.user.email||'ログイン中';
-    statusEl.textContent=email;
-    loginBtn.style.display='none';
-    logoutBtn.style.display='';
-    hint.style.display='none';
-    loggedInArea.style.display='block';
-    loadMyTabs();
-  } else {
-    statusEl.textContent='未ログイン';
-    loginBtn.style.display='';
-    logoutBtn.style.display='none';
-    hint.style.display='';
-    loggedInArea.style.display='none';
-  }
+// ── Google Drive save (replaces the old database save) ───────────────
+// Saves each tab as a plain-text (.txt) file in the user's own Google Drive.
+// Scope "drive.file" = the app can only touch files it created or that the user
+// picked with the Google Picker. No server and no database are involved.
+const GD_CLIENT_ID='631014031230-e04sbjcq71h8avbakbq0s8iuu3jet6u6.apps.googleusercontent.com';   // OAuth 2.0 クライアントID（ウェブアプリケーション）
+const GD_API_KEY='AIzaSyBeUcuYYEZyUupoW_xSYLBqf1wt-1j5GeY';     // APIキー（Picker用。HTTPリファラーで制限しておく）
+const GD_APP_ID='631014031230';      // Google Cloud プロジェクト番号（Picker用）
+const GD_SCOPE='https://www.googleapis.com/auth/drive.file';
+const GD_DEFAULT_FOLDER='Bass Tab Editor';
+const gd={token:null,exp:0,tc:null,cb:null,eb:null,connected:false,folder:null,files:[]};
+try{const f=JSON.parse(localStorage.getItem('bte_gdFolder')||'null');if(f&&f.id)gd.folder=f;}catch(e){}
+function gdConfigured(){return !!GD_CLIENT_ID;}
+function gdPickerReady(){return !!(GD_API_KEY&&GD_APP_ID);}
+function cloudMsg(msg,isErr){const el=document.getElementById('cloudMsg');if(!el)return;el.textContent=msg;el.style.color=isErr?'var(--red)':'var(--green)';el.style.fontSize='11px';clearTimeout(cloudMsg._t);cloudMsg._t=setTimeout(()=>{el.textContent='';},isErr?9000:4000);}
+function gdErrText(e){
+  const m=(e&&e.message)||'';
+  if(/popup_failed|popup_closed|access_denied/.test(m))return 'Googleの許可画面が閉じられました。もう一度お試しください（ポップアップのブロックも確認してください）';
+  if(e&&e.status===403)return 'ドライブへのアクセスが許可されていません（接続し直してください）';
+  if(e&&e.status===404)return 'ファイルまたはフォルダが見つかりません';
+  if(/Failed to fetch|NetworkError/.test(m))return '通信に失敗しました。ネットワークを確認してください';
+  return 'ドライブの操作に失敗しました';
 }
-document.getElementById('loginBtn').addEventListener('click',async()=>{
-  const{error}=await sbClient.auth.signInWithOAuth({provider:'google',options:{redirectTo:cleanAppUrl()}});
-  if(error){console.error('signInWithOAuth error:',error);cloudMsg('ログインに失敗しました: '+error.message,true);}
-});
-document.getElementById('logoutBtn').addEventListener('click',async()=>{
-  if(!confirm('ログアウトします。よろしいですか？'))return;
-  const{error}=await sbClient.auth.signOut();
-  if(error){console.error('signOut error:',error);cloudMsg('ログアウトに失敗しました',true);return;}
-  refreshAuthUI();
-});
-sbClient.auth.onAuthStateChange((_event,_session)=>{refreshAuthUI();});
-
-// Check whether the given user already has a tab saved under this exact title.
-async function isTitleTaken(userId,title,excludeId){
-  let q=sbClient.from('tabs').select('id').eq('user_id',userId).eq('title',title);
-  if(excludeId)q=q.neq('id',excludeId);
-  const{data,error}=await q;
-  if(error)return false; // fail-open: don't block saving just because the check itself failed
-  return data&&data.length>0;
-}
-// Find a title that isn't taken yet, appending "(2)", "(3)", ... as needed.
-async function uniqueTitle(userId,baseTitle){
-  let candidate=baseTitle,n=2;
-  while(await isTitleTaken(userId,candidate)){candidate=`${baseTitle}(${n})`;n++;}
-  return candidate;
-}
-
-async function cloudSave(){
-  const{data:{session}}=await sbClient.auth.getSession();
-  if(!session){cloudMsg('ログインしてください',true);return;}
-  const titleInp=document.getElementById('saveTitleInp');
-  const title=titleInp.value.trim()||'無題のタブ譜';
-  if(await isTitleTaken(session.user.id,title)){
-    cloudMsg('同じ名前の保存データがすでにあります。別の名前にしてください',true);
-    return;
-  }
-  const code=expData();
-  const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title,code});
-  if(error){cloudMsg('保存に失敗しました',true);return;}
-  titleInp.value='';markSaved();
-  cloudMsg('保存しました',false);
-  loadMyTabs();
-}
-document.getElementById('cloudSaveBtn').addEventListener('click',cloudSave);
-
-async function loadMyTabs(){
-  const listEl=document.getElementById('myTabsList');
-  const{data:{session}}=await sbClient.auth.getSession();
-  if(!session)return;
-  const{data,error}=await sbClient.from('tabs').select('id,title,code,updated_at').eq('user_id',session.user.id).order('updated_at',{ascending:false});
-  listEl.innerHTML='';
-  if(error){listEl.innerHTML='<div class="mytab-empty">読み込みに失敗しました</div>';return;}
-  if(!data||data.length===0){listEl.innerHTML='<div class="mytab-empty">保存されたタブ譜はまだありません</div>';return;}
-  data.forEach(row=>{
-    const r=document.createElement('div');r.className='mytab-row';
-    const t=document.createElement('div');t.className='mytab-title';t.textContent=row.title;
-    const d=document.createElement('div');d.className='mytab-date';
-    const dt=new Date(row.updated_at);d.textContent=`${dt.getFullYear()}/${dt.getMonth()+1}/${dt.getDate()}`;
-    const acts=document.createElement('div');acts.className='mytab-acts';
-    const openB=document.createElement('button');openB.className='btn sm';openB.textContent='開く';
-    openB.addEventListener('click',()=>{
-      try{impData(row.code);markSaved();showMsg('読み込みました',false);}catch(e){cloudMsg('読み込みに失敗しました（データが壊れている可能性があります）',true);}
-    });
-    const overB=document.createElement('button');overB.className='btn sm';overB.textContent='上書き保存';
-    overB.title='今開いているタブ譜の内容で、このタブ譜を上書きします';
-    overB.addEventListener('click',async()=>{
-      if(!confirm(`「${row.title}」を、今開いている内容で上書き保存します。よろしいですか？`))return;
-      const code=expData();
-      const{error}=await sbClient.from('tabs').update({code,updated_at:new Date().toISOString()}).eq('id',row.id);
-      if(error)cloudMsg('上書き保存に失敗しました',true);else{markSaved();cloudMsg('上書き保存しました',false);loadMyTabs();}
-    });
-    const dupB=document.createElement('button');dupB.className='btn sm';dupB.textContent='複製';
-    dupB.addEventListener('click',async()=>{
-      const baseTitle=row.title+' のコピー';
-      const finalTitle=await uniqueTitle(session.user.id,baseTitle);
-      const{error}=await sbClient.from('tabs').insert({user_id:session.user.id,title:finalTitle,code:row.code});
-      if(error)cloudMsg('複製に失敗しました',true);else{cloudMsg('複製しました',false);loadMyTabs();}
-    });
-    const copyB=document.createElement('button');copyB.className='btn sm';copyB.textContent='コードをコピー';
-    copyB.addEventListener('click',()=>{
-      navigator.clipboard.writeText(row.code).then(()=>cloudMsg('コードをコピーしました',false)).catch(()=>cloudMsg('コピーに失敗しました',true));
-    });
-    const delB=document.createElement('button');delB.className='btn sm pop-del';delB.textContent='削除';
-    delB.addEventListener('click',async()=>{
-      if(!confirm(`「${row.title}」を削除します。よろしいですか？`))return;
-      const{error}=await sbClient.from('tabs').delete().eq('id',row.id);
-      if(error)cloudMsg('削除に失敗しました',true);else{cloudMsg('削除しました',false);loadMyTabs();}
-    });
-    acts.appendChild(openB);acts.appendChild(overB);acts.appendChild(dupB);acts.appendChild(copyB);acts.appendChild(delB);
-    r.appendChild(t);r.appendChild(d);r.appendChild(acts);
-    listEl.appendChild(r);
+function gdLoadScript(src){return new Promise((res,rej)=>{
+  if(document.querySelector('script[data-gd="'+src+'"]')){res();return;}
+  const s=document.createElement('script');s.src=src;s.async=true;s.dataset.gd=src;s.onload=()=>res();s.onerror=()=>rej(new Error('script load failed'));document.head.appendChild(s);});}
+// Access tokens last about an hour; the sign-in popup must be opened from a click.
+async function gdEnsureToken(){
+  if(gd.token&&Date.now()<gd.exp-60000)return gd.token;
+  if(!gdConfigured())throw new Error('not configured');
+  await gdLoadScript('https://accounts.google.com/gsi/client');
+  return new Promise((resolve,reject)=>{
+    if(!gd.tc)gd.tc=google.accounts.oauth2.initTokenClient({client_id:GD_CLIENT_ID,scope:GD_SCOPE,callback:r=>gd.cb&&gd.cb(r),error_callback:e=>gd.eb&&gd.eb(e)});
+    gd.cb=r=>{if(r&&r.error){reject(new Error(r.error));return;}gd.token=r.access_token;gd.exp=Date.now()+(r.expires_in||3600)*1000;resolve(gd.token);};
+    gd.eb=e=>reject(new Error((e&&e.type)||'popup_failed'));
+    gd.tc.requestAccessToken({prompt:''});
   });
 }
-refreshAuthUI();
+async function gdFetch(url,opts){
+  opts=opts||{};
+  for(let attempt=0;attempt<2;attempt++){
+    const tok=await gdEnsureToken();
+    const r=await fetch(url,Object.assign({},opts,{headers:Object.assign({},opts.headers||{},{Authorization:'Bearer '+tok})}));
+    if(r.status===401&&attempt===0){gd.token=null;continue;}
+    if(!r.ok){const e=new Error('drive '+r.status);e.status=r.status;throw e;}
+    return r;
+  }
+}
+const GD_API='https://www.googleapis.com/drive/v3/files';
+const GD_UP='https://www.googleapis.com/upload/drive/v3/files';
+async function gdEnsureFolder(){
+  if(gd.folder){
+    try{const j=await(await gdFetch(GD_API+'/'+gd.folder.id+'?fields=id,name,trashed')).json();if(!j.trashed){gd.folder={id:j.id,name:j.name};return gd.folder;}}catch(e){if(e.status!==404&&e.status!==403)throw e;}
+    gd.folder=null;
+  }
+  const q=encodeURIComponent("name='"+GD_DEFAULT_FOLDER+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  const found=(await(await gdFetch(GD_API+'?q='+q+'&fields=files(id,name)&pageSize=1')).json()).files||[];
+  let f=found[0];
+  if(!f){
+    f=await(await gdFetch(GD_API+'?fields=id,name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:GD_DEFAULT_FOLDER,mimeType:'application/vnd.google-apps.folder'})})).json();
+  }
+  gd.folder={id:f.id,name:f.name};
+  try{localStorage.setItem('bte_gdFolder',JSON.stringify(gd.folder));}catch(e){}
+  return gd.folder;
+}
+async function gdPickFolder(){
+  const tok=await gdEnsureToken();
+  await gdLoadScript('https://apis.google.com/js/api.js');
+  await new Promise(res=>gapi.load('picker',res));
+  return new Promise(resolve=>{
+    const view=new google.picker.DocsView(google.picker.ViewId.FOLDERS).setSelectFolderEnabled(true).setIncludeFolders(true).setMimeTypes('application/vnd.google-apps.folder');
+    new google.picker.PickerBuilder().setTitle('保存先のフォルダを選んでください').setLocale('ja').addView(view)
+      .setOAuthToken(tok).setDeveloperKey(GD_API_KEY).setAppId(GD_APP_ID)
+      .setCallback(d=>{
+        if(d.action===google.picker.Action.PICKED){const doc=d.docs[0];resolve({id:doc.id,name:doc.name});}
+        else if(d.action===google.picker.Action.CANCEL)resolve(null);
+      }).build().setVisible(true);
+  });
+}
+function gdCleanTitle(t){return t.replace(/[\\/:*?"<>|\r\n]+/g,' ').replace(/\s+/g,' ').trim().slice(0,100);}
+function gdTitleOf(f){return f.name.replace(/\.txt$/i,'');}
+async function gdList(){
+  const f=await gdEnsureFolder();
+  const q=encodeURIComponent("'"+f.id+"' in parents and trashed=false and mimeType='text/plain'");
+  const j=await(await gdFetch(GD_API+'?q='+q+'&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=200')).json();
+  return j.files||[];
+}
+async function gdCreate(title,content){
+  const f=await gdEnsureFolder(),b='bte'+Math.random().toString(36).slice(2);
+  const body='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:title+'.txt',parents:[f.id],mimeType:'text/plain'})+'\r\n--'+b+'\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n'+content+'\r\n--'+b+'--';
+  return(await gdFetch(GD_UP+'?uploadType=multipart&fields=id,name,modifiedTime',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body})).json();
+}
+async function gdUpdate(id,content){return(await gdFetch(GD_UP+'/'+id+'?uploadType=media&fields=id,modifiedTime',{method:'PATCH',headers:{'Content-Type':'text/plain; charset=UTF-8'},body:content})).json();}
+async function gdRead(id){return(await gdFetch(GD_API+'/'+id+'?alt=media')).text();}
+async function gdTrash(id){return gdFetch(GD_API+'/'+id+'?fields=id',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});}
+async function gdUniqueTitle(base){
+  const names=new Set((await gdList()).map(gdTitleOf));let c=base,n=2;
+  while(names.has(c)){c=base+'('+n+')';n++;}return c;
+}
+function gdSetUI(){
+  const conf=gdConfigured(),conn=gd.connected;
+  const st=document.getElementById('acctStatus'),lb=document.getElementById('loginBtn'),ob=document.getElementById('logoutBtn');
+  const hint=document.getElementById('cloudHint'),area=document.getElementById('cloudLoggedInArea');
+  st.textContent=conn?'Googleドライブ：接続中':'Googleドライブ：未接続';
+  lb.style.display=conn?'none':'';ob.style.display=conn?'':'none';
+  lb.disabled=!conf;
+  hint.style.display=conn?'none':'';area.style.display=conn?'block':'none';
+  hint.textContent=conf?'「Googleドライブに接続」を押すと、あなたのGoogleドライブにタブ譜を保存できます（保存先のフォルダも選べます）。':'Googleドライブ保存は準備中です（連携の設定が未完了です）。';
+  const fn=document.getElementById('gdFolderName');if(fn)fn.textContent=gd.folder?gd.folder.name:'（自動作成：'+GD_DEFAULT_FOLDER+'）';
+  const pb=document.getElementById('gdPickBtn');if(pb)pb.style.display=gdPickerReady()?'':'none';
+}
+async function gdRefreshList(){
+  const listEl=document.getElementById('myTabsList');
+  listEl.innerHTML='<div class="mytab-empty">読み込み中…</div>';
+  try{gd.files=await gdList();}catch(e){console.error(e);listEl.innerHTML='<div class="mytab-empty">読み込みに失敗しました</div>';cloudMsg(gdErrText(e),true);return;}
+  gdSetUI();
+  listEl.innerHTML='';
+  if(!gd.files.length){listEl.innerHTML='<div class="mytab-empty">保存されたタブ譜はまだありません</div>';return;}
+  gd.files.forEach(row=>{
+    const title=gdTitleOf(row);
+    const r=document.createElement('div');r.className='mytab-row';
+    const t=document.createElement('div');t.className='mytab-title';t.textContent=title;
+    const d=document.createElement('div');d.className='mytab-date';
+    const dt=new Date(row.modifiedTime);d.textContent=dt.getFullYear()+'/'+(dt.getMonth()+1)+'/'+dt.getDate();
+    const acts=document.createElement('div');acts.className='mytab-acts';
+    const mk=(label,cls,fn)=>{const b=document.createElement('button');b.className=cls;b.textContent=label;b.addEventListener('click',fn);return b;};
+    acts.appendChild(mk('開く','btn sm',async()=>{
+      try{const txt=await gdRead(row.id);impData(txt);markSaved();showMsg('読み込みました',false);}
+      catch(e){console.error(e);cloudMsg(e&&e.status?gdErrText(e):'読み込みに失敗しました（データが壊れている可能性があります）',true);}
+    }));
+    const ov=mk('上書き保存','btn sm',async()=>{
+      if(!confirm('「'+title+'」を、今開いている内容で上書き保存します。よろしいですか？'))return;
+      try{await gdUpdate(row.id,expJson());markSaved();cloudMsg('上書き保存しました',false);gdRefreshList();}catch(e){console.error(e);cloudMsg(gdErrText(e),true);}
+    });ov.title='今開いているタブ譜の内容で、このファイルを上書きします';acts.appendChild(ov);
+    acts.appendChild(mk('複製','btn sm',async()=>{
+      try{const txt=await gdRead(row.id),nt=await gdUniqueTitle(gdCleanTitle(title+' のコピー'));await gdCreate(nt,txt);cloudMsg('複製しました',false);gdRefreshList();}catch(e){console.error(e);cloudMsg(gdErrText(e),true);}
+    }));
+    acts.appendChild(mk('コードをコピー','btn sm',async()=>{
+      try{const txt=await gdRead(row.id);await navigator.clipboard.writeText(txt);cloudMsg('コードをコピーしました',false);}catch(e){cloudMsg('コピーに失敗しました',true);}
+    }));
+    acts.appendChild(mk('削除','btn sm pop-del',async()=>{
+      if(!confirm('「'+title+'」を削除します（Googleドライブのゴミ箱に移動します）。よろしいですか？'))return;
+      try{await gdTrash(row.id);cloudMsg('削除しました（ゴミ箱に移動）',false);gdRefreshList();}catch(e){console.error(e);cloudMsg(gdErrText(e),true);}
+    }));
+    r.appendChild(t);r.appendChild(d);r.appendChild(acts);listEl.appendChild(r);
+  });
+}
+async function gdConnect(){
+  try{await gdEnsureToken();gd.connected=true;gdSetUI();await gdEnsureFolder();gdSetUI();await gdRefreshList();}
+  catch(e){console.error(e);cloudMsg(gdErrText(e),true);}
+}
+document.getElementById('loginBtn').addEventListener('click',gdConnect);
+document.getElementById('logoutBtn').addEventListener('click',()=>{
+  if(!confirm('Googleドライブとの接続を解除します。（Googleアカウント側の許可も取り消されます。保存済みのファイルは消えません）'))return;
+  try{if(gd.token&&window.google&&google.accounts&&google.accounts.oauth2)google.accounts.oauth2.revoke(gd.token,()=>{});}catch(e){}
+  gd.token=null;gd.exp=0;gd.connected=false;gd.files=[];gd.folder=null;try{localStorage.removeItem('bte_gdFolder');}catch(e){}
+  gdSetUI();
+});
+document.getElementById('gdPickBtn').addEventListener('click',async()=>{
+  try{const f=await gdPickFolder();if(f){gd.folder=f;try{localStorage.setItem('bte_gdFolder',JSON.stringify(f));}catch(e){}gdSetUI();gdRefreshList();cloudMsg('保存先を「'+f.name+'」にしました',false);}}
+  catch(e){console.error(e);cloudMsg(gdErrText(e),true);}
+});
+async function cloudSave(){
+  const titleInp=document.getElementById('saveTitleInp');
+  const title=gdCleanTitle(titleInp.value)||'無題のタブ譜';
+  try{
+    const names=new Set((await gdList()).map(gdTitleOf));
+    if(names.has(title)){cloudMsg('同じ名前の保存データがすでにあります。別の名前にしてください',true);return;}
+    await gdCreate(title,expJson());
+    titleInp.value='';markSaved();cloudMsg('保存しました',false);gdRefreshList();
+  }catch(e){console.error(e);cloudMsg(gdErrText(e),true);}
+}
+document.getElementById('cloudSaveBtn').addEventListener('click',cloudSave);
+gdSetUI();
 
 // ── Popup ──────────────────────────────────────────────────────────
 let activePop=null,activeBackdrop=null,popResizeHandler=null,popVVHandler=null;
