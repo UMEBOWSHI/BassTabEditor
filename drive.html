@@ -367,7 +367,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
 </div>
 
-<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-H（Googleドライブ保存） ／ BTE形式の長さ＝16分音符の個数 ／ <a href="privacy.html" style="color:inherit">プライバシーポリシー</a></div>
+<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-H2（Googleドライブ保存） ／ BTE形式の長さ＝16分音符の個数 ／ <a href="privacy.html" style="color:inherit">プライバシーポリシー</a></div>
 <script>
 // ── Constants ──────────────────────────────────────────────────────
 // ── Time resolution ────────────────────────────────────────────────
@@ -912,9 +912,9 @@ function bteImport(text){
 // Saves each tab as a plain-text (.txt) file in the user's own Google Drive.
 // Scope "drive.file" = the app can only touch files it created or that the user
 // picked with the Google Picker. No server and no database are involved.
-const GD_CLIENT_ID='';   // OAuth 2.0 クライアントID（ウェブアプリケーション）
-const GD_API_KEY='';     // APIキー（Picker用。HTTPリファラーで制限しておく）
-const GD_APP_ID='';      // Google Cloud プロジェクト番号（Picker用）
+const GD_CLIENT_ID='631014031230-e04sbjcq71h8avbakbq0s8iuu3jet6u6.apps.googleusercontent.com';   // OAuth 2.0 クライアントID（ウェブアプリケーション）
+const GD_API_KEY='AIzaSyBeUcuYYEZyUupoW_xSYLBqf1wt-1j5GeY';     // APIキー（Picker用。HTTPリファラーで制限しておく）
+const GD_APP_ID='631014031230';      // Google Cloud プロジェクト番号（Picker用）
 const GD_SCOPE='https://www.googleapis.com/auth/drive.file';
 const GD_DEFAULT_FOLDER='Bass Tab Editor';
 const gd={token:null,exp:0,tc:null,cb:null,eb:null,connected:false,folder:null,files:[]};
