@@ -108,6 +108,10 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 .tab-view-scroll.pv-light{--pv-fg:#111;background:#fff}
 .tab-view-scroll.pv-dark{--pv-fg:#f2f2f2;background:#000}
 .tab-svg{display:block;color:var(--pv-fg,#111)}
+.perf-big .tab-scroll,.perf-big .tab-view-scroll{will-change:transform}
+.tab-svg-box{position:relative;padding-top:22px;color:var(--pv-fg,#111)}
+.tab-svg-box>svg{display:block;overflow:visible}
+.pv-ph{position:absolute;left:0;top:0;width:1.5px;margin-left:-.75px;background:#2a7fd4;pointer-events:none;will-change:transform;opacity:0}
 .svgn{color:var(--pv-fg,#111)}
 .svgn.playing{color:#e8a020}
 .svgn.flash{animation:svgFlash .7s ease-out}
@@ -326,7 +330,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
   <button class="btn sm active" id="pvExpBtn">A4で保存</button>
   <span class="lbl" id="pvExpMsg"></span>
 </div>
-<div class="tab-view-outer"><div class="tab-view-scroll" id="tabViewScroll"><svg id="tabSvg" class="tab-svg"></svg></div></div>
+<div class="tab-view-outer"><div class="tab-view-scroll" id="tabViewScroll"><div id="tabSvg" class="tab-svg-box"></div></div></div>
 <div class="divider"><span>保存・読み込み</span><hr></div>
 <div class="io-panel">
   <div class="io-panel-title">テキストコードでエクスポート／インポート</div>
@@ -367,7 +371,7 @@ input[type=range]{flex:1;max-width:110px;accent-color:var(--amber)}
 <div class="status-bar"><div class="sdot" id="sdot"></div><span id="statusTxt">停止中</span></div>
 </div>
 
-<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-I（Googleドライブ保存） ／ BTE形式の長さ＝16分音符の個数 ／ <a href="privacy.html" style="color:inherit">プライバシーポリシー</a></div>
+<div id="appVer" style="text-align:center;font-size:11px;color:#888;margin:24px 0 12px">版 2026-11-J（Googleドライブ保存） ／ BTE形式の長さ＝16分音符の個数 ／ <a href="privacy.html" style="color:inherit">プライバシーポリシー</a></div>
 <script>
 // ── Constants ──────────────────────────────────────────────────────
 // ── Time resolution ────────────────────────────────────────────────
@@ -1841,41 +1845,32 @@ function animPH(){
   }
   const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,PL=pvLayout();
   const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=PL.LP+ci*SX,LH=PL.LH,ly=SVG_TP+li*LH;
-  if(!phSvgEl)phSvgEl=document.getElementById('tabSvg');
-  const svg=phSvgEl;
-  if(svg){
-    if(!phLine||phLine.parentNode!==svg){
-      phLine=svg.querySelector('.svgph');
-      if(!phLine){phLine=document.createElementNS('http://www.w3.org/2000/svg','line');phLine.classList.add('svgph');phLine.setAttribute('stroke','#2a7fd4');phLine.setAttribute('stroke-width','1.5');svg.appendChild(phLine);}
-    }
-    phLine.setAttribute('x1',cx);phLine.setAttribute('x2',cx);phLine.setAttribute('y1',ly+PL.phY1);phLine.setAttribute('y2',ly+PL.phY2);phLine.setAttribute('opacity','1');
-    if(autoSc){
-      if(!phScrollEl)phScrollEl=document.getElementById('tabViewScroll');
-      const w=phScrollEl;
-      if(w&&li!==phLastScrollLine){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.5){w.scrollTo({top:tY,behavior:'smooth'});phLastScrollLine=li;}}
-    }
+  pvPlayhead(cx,ly+PL.phY1,ly+PL.phY2,true);
+  if(autoSc){
+    if(!phScrollEl)phScrollEl=document.getElementById('tabViewScroll');
+    const w=phScrollEl;
+    if(w&&li!==phLastScrollLine){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.5){w.scrollTo({top:tY,behavior:'smooth'});phLastScrollLine=li;}}
   }
   afId=requestAnimationFrame(animPH);
 }
-function hidePH(){cancelAnimationFrame(afId);const s=document.getElementById('tabSvg');if(s){const l=s.querySelector('.svgph');if(l)l.setAttribute('opacity','0');}}
+function hidePH(){cancelAnimationFrame(afId);pvPlayhead(0,0,0,false);}
 function updGP(step){for(let b=0;b<bars;b++){const ph=document.getElementById('ph-b-'+b);if(!ph)continue;const bs=b*SPB;if(step>=0&&step>=bs&&step<bs+SPB){ph.style.left=(stepX(step-bs)+SW/(2*TPS)-1)+'px';ph.classList.add('visible');}else ph.classList.remove('visible');}}
 // Statically position the SVG preview playhead line at a given step (used when not actively playing,
 // e.g. after skip/rewind/scrub while paused). Does not animate — animPH() handles smooth motion during playback.
 function updateSvgPH(step){
-  const svg=document.getElementById('tabSvg');if(!svg)return;
-  if(step<0){const l=svg.querySelector('.svgph');if(l)l.setAttribute('opacity','0');return;}
+  if(!document.getElementById('tabSvg'))return;
+  if(step<0){pvPlayhead(0,0,0,false);return;}
   const CW=getCW(),SX=CW/TPS,stepsPerLine=svgBPL*SPB,PL=pvLayout();
   const ts=tSteps();const safePos=((step%ts)+ts)%ts;
   const li=Math.floor(safePos/stepsPerLine),ci=safePos%stepsPerLine,cx=PL.LP+ci*SX,LH=PL.LH,ly=SVG_TP+li*LH;
-  let ln=svg.querySelector('.svgph');
-  if(!ln){ln=document.createElementNS('http://www.w3.org/2000/svg','line');ln.classList.add('svgph');ln.setAttribute('stroke','#2a7fd4');ln.setAttribute('stroke-width','1.5');svg.appendChild(ln);}
-  ln.setAttribute('x1',cx);ln.setAttribute('x2',cx);ln.setAttribute('y1',ly+PL.phY1);ln.setAttribute('y2',ly+PL.phY2);ln.setAttribute('opacity','1');
+  pvPlayhead(cx,ly+PL.phY1,ly+PL.phY2,true);
   if(autoSc){const w=document.getElementById('tabViewScroll');if(w){const tY=li*LH;if(Math.abs(w.scrollTop-tY)>LH*.8)w.scrollTo({top:tY,behavior:'smooth'});}}
 }
 
 
 // ── Canvas ─────────────────────────────────────────────────────────
 function buildCanvas(){
+  document.body.classList.toggle('perf-big',bars>=40);
   lastHlStep=-1; // DOM is rebuilt below; stale highlight refs no longer apply
   const cv=document.getElementById('tabCanvas');cv.innerHTML='';
   const strs=gStr();const NS=strs.length;const slotsPerBeat=VIS/tSig; // visible slots per beat
@@ -2202,21 +2197,22 @@ function pvTie(x1,x2,y,dir){const m=(x1+x2)/2,d=dir*7;return`<path d="M${x1} ${y
 function pvNLines(){return Math.max(1,Math.ceil(tSteps()/(svgBPL*SPB)));}
 // Builds the SVG body for systems [l0,l1). Used by the on-screen preview (all
 // systems) and by the A4 export (a page worth of systems at a time).
-function pvBuild(l0,l1){
+function pvBuild(l0,l1,topPad,prePieces){
   const strs=gStr(),NS=strs.length,CW=getCW(),tot=tSteps();
   const L=pvLayout(),LP=L.LP,pat=L.pat;
   const stepsPerLine=svgBPL*SPB,SX=CW/TPS,barW=SPB*SX;
   const nL=pvNLines();
   if(l0==null)l0=0;if(l1==null)l1=nL;
-  const LH=L.LH,W=LP+svgBPL*barW+SVG_RP,H=(l1-l0)*LH+SVG_TP;
+  const TP=(topPad==null)?SVG_TP:topPad;
+  const LH=L.LH,W=LP+svgBPL*barW+SVG_RP,H=(l1-l0)*LH+TP;
   const sx=st=>LP+st*SX;
   const NX=pat==='C'?12:7,fs=CW===10?9:12;
-  const pieces=pat==='B'?[]:pvBuildPieces(stepsPerLine);
+  const pieces=pat==='B'?[]:(prePieces||pvBuildPieces(stepsPerLine));
   const tsLbl=tSig===4?['4','4']:tSig===3?['3','4']:['6','8'];
   const numHW=s=>Math.max(3.5,String(s).length*fs*0.31+1.5);
   let h='';
   for(let line=l0;line<l1;line++){
-    const ly=SVG_TP+(line-l0)*LH,sc=line*stepsPerLine;
+    const ly=TP+(line-l0)*LH,sc=line*stepsPerLine;
     const lineBars=Math.min(svgBPL,bars-line*svgBPL);if(lineBars<=0)continue;
     const lineW=lineBars*barW,xEnd=LP+lineW;
     const tY=si=>ly+L.t0+si*L.SG;
@@ -2449,14 +2445,30 @@ function pvBuild(l0,l1){
   }
   return{h,W,H,LH,nL};
 }
+// The preview is one <svg> per system (line of bars) instead of a single huge SVG, and the
+// playhead is a separate overlay <div>. A change inside one big SVG re-records the whole thing
+// every frame (very slow for 100+ bars); with separate pieces only the affected line repaints.
 function renderSvg(){
-  const svg=document.getElementById('tabSvg');if(!svg)return;
+  const box=document.getElementById('tabSvg');if(!box)return;
   const wrap=document.getElementById('tabViewScroll');
   if(wrap){wrap.classList.toggle('pv-light',pvTheme==='light');wrap.classList.toggle('pv-dark',pvTheme==='dark');}
-  const r=pvBuild(0,pvNLines());
-  svg.setAttribute('viewBox',`0 0 ${r.W} ${r.H}`);svg.setAttribute('width',r.W);svg.setAttribute('height',r.H);svg.innerHTML=r.h;
-  phLine=null;phLastScrollLine=-1; // SVG innerHTML replaced; cached playhead line is stale
-  if(wrap){const tH=r.LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=r.nL>2?'auto':'hidden';}
+  const nL=pvNLines(),L=pvLayout(),pieces=L.pat==='B'?[]:pvBuildPieces(svgBPL*SPB);
+  let html='';
+  for(let l=0;l<nL;l++){
+    const r=pvBuild(l,l+1,0,pieces);
+    html+='<svg class="pv-line" width="'+r.W+'" height="'+r.H+'" viewBox="0 0 '+r.W+' '+r.H+'">'+r.h+'</svg>';
+  }
+  box.innerHTML=html+'<div class="pv-ph" id="pvPh"></div>';
+  phLine=null;phLastScrollLine=-1; // overlay element was recreated; cached reference is stale
+  if(wrap){const tH=L.LH*2+SVG_TP+20;wrap.style.maxHeight=tH+'px';wrap.style.overflowY=nL>2?'auto':'hidden';}
+}
+// Playhead overlay: moved with a transform only, so no SVG content is repainted.
+function pvPlayhead(cx,y1,y2,show){
+  let ph=phLine;if(!ph||!ph.isConnected)ph=phLine=document.getElementById('pvPh');
+  if(!ph)return;
+  if(!show){ph.style.opacity='0';return;}
+  const h=Math.round(y2-y1);if(ph._h!==h){ph.style.height=h+'px';ph._h=h;}
+  ph.style.transform='translate('+cx+'px,'+y1+'px)';ph.style.opacity='1';
 }
 
 function pvSetOpts(){
